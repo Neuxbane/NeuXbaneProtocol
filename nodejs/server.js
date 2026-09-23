@@ -69,8 +69,8 @@ function getOrCreateSession(req, res) {
     }
   };
 
-  const originalEnd = res.end.bind(res);
-  res.end = (chunk, encoding, callback) => {
+  const originalWriteHead = res.writeHead.bind(res);
+  res.writeHead = (...args) => {
     if (cleared) {
       res.setHeader(
         'Set-Cookie',
@@ -84,7 +84,7 @@ function getOrCreateSession(req, res) {
       );
     }
 
-    return originalEnd(chunk, encoding, callback);
+    return originalWriteHead(...args);
   };
 
   return session;
