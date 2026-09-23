@@ -31,6 +31,36 @@ export class NxpNode {
     return this;
   }
 
+  validateParams(params) {
+    const validated = { ...params };
+
+    for (const [key, rule] of Object.entries(this.schema)) {
+      let value = validated[key];
+
+      if (value === undefined && rule.default !== undefined) {
+        value = rule.default;
+        validated[key] = value;
+      }
+
+      if (value === undefined || value === null || value === '') {
+        if (rule.required) {
+          throw new Error(`400: Parameter '${key}' is required.`);
+        }
+        continue;
+      }
+
+      if (rule.type && typeof value !== rule.type) {
+        throw new Error(`400: Parameter '${key}' must be a ${rule.type}.`);
+      }
+
+      if (rule.enum && !rule.enum.includes(value)) {
+        throw new Error(`400: Parameter '${key}' must be one of: ${rule.enum.join(', ')}.`);
+      }
+    }
+
+    return validated;
+  }
+
   isLeaf() {
     return this.children.size === 0;
   }

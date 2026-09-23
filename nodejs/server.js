@@ -6,39 +6,88 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFINE_DIR = path.join(__dirname, 'define');
-const SESSION_SECRET = crypto.randomBytes(32).toString('hex');
-const SESSIONS = new Map();
+const SESSION_SECRET = process.env.NXP_SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const SESSION_KEY = crypto.createHash('sha256').update(SESSION_SECRET).digest();
+const SESSION_COOKIE = 'nxp_session';
+const SESSION_MAX_AGE = 60 * 60 * 24 * 7;
+
+function encryptSession(session) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', SESSION_KEY, iv);
+  const encrypted = Buffer.concat([
+    cipher.update(JSON.stringify(session), 'utf8'),
+    cipher.final()
+  ]);
+  const tag = cipher.getAuthTag();
+
+  return [iv, tag, encrypted]
+    .map((part) => part.toString('base64url'))
+    .join('.');
+}
+
+function decryptSession(value) {
+  const [encodedIv, encodedTag, encodedData] = value.split('.');
+  if (!encodedIv || !encodedTag || !encodedData) return null;
+
+  try {
+    const decipher = crypto.createDecipheriv(
+      'aes-256-gcm',
+      SESSION_KEY,
+      Buffer.from(encodedIv, 'base64url')
+    );
+    decipher.setAuthTag(Buffer.from(encodedTag, 'base64url'));
+    const decrypted = Buffer.concat([
+      decipher.update(Buffer.from(encodedData, 'base64url')),
+      decipher.final()
+    ]);
+    const session = JSON.parse(decrypted.toString('utf8'));
+
+    return session && typeof session === 'object' ? session : null;
+  } catch {
+    return null;
+  }
+}
 
 function getOrCreateSession(req, res) {
   const cookieHeader = req.headers.cookie || '';
-  const match = cookieHeader.match(/(?:^|;\s*)nxp_sid=([^;]+)/);
-  let sid = match ? match[1] : null;
+  const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
+  const stored = match ? decryptSession(match[1]) : null;
+  const state = stored || { id: crypto.randomUUID(), data: {} };
+  let cleared = false;
 
-  if (sid) {
-    const [rawId, signature] = sid.split('.');
-    const expected = crypto.createHmac('sha256', SESSION_SECRET).update(rawId).digest('hex');
-    if (signature !== expected || !SESSIONS.has(rawId)) {
-      sid = null;
-    } else {
-      sid = rawId;
+  const session = {
+    id: state.id,
+    get: (key) => state.data[key],
+    set: (key, value) => {
+      state.data[key] = value;
+      cleared = false;
+    },
+    delete: (key) => delete state.data[key],
+    clear: () => {
+      state.data = {};
+      cleared = true;
     }
-  }
-
-  if (!sid) {
-    sid = crypto.randomUUID();
-    const signature = crypto.createHmac('sha256', SESSION_SECRET).update(sid).digest('hex');
-    SESSIONS.set(sid, new Map());
-    res.setHeader('Set-Cookie', `nxp_sid=${sid}.${signature}; Path=/; HttpOnly; SameSite=Lax`);
-  }
-
-  const store = SESSIONS.get(sid);
-  return {
-    id: sid,
-    get: (key) => store.get(key),
-    set: (key, value) => store.set(key, value),
-    delete: (key) => store.delete(key),
-    clear: () => store.clear()
   };
+
+  const originalEnd = res.end.bind(res);
+  res.end = (chunk, encoding, callback) => {
+    if (cleared) {
+      res.setHeader(
+        'Set-Cookie',
+        `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+      );
+    } else {
+      const value = encryptSession(state);
+      res.setHeader(
+        'Set-Cookie',
+        `${SESSION_COOKIE}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`
+      );
+    }
+
+    return originalEnd(chunk, encoding, callback);
+  };
+
+  return session;
 }
 
 async function buildTree(dirPath) {
@@ -110,7 +159,15 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify(targetNode.describe(targetStep.path), null, 2));
   }
 
-  const ctx = { req, res, params, session, targetNode, pathname };
+  let validatedParams;
+  try {
+    validatedParams = targetNode.validateParams(params);
+  } catch (error) {
+    res.writeHead(400);
+    return res.end(JSON.stringify({ error: error.message }));
+  }
+
+  const ctx = { req, res, params: validatedParams, session, targetNode, pathname };
 
   try {
     for (const step of pipeline) {
