@@ -1,3 +1,12 @@
+import Ajv from 'ajv';
+
+const ajv = new Ajv({
+  allErrors: true,
+  coerceTypes: false,
+  useDefaults: true,
+  strict: false
+});
+
 export class NxpNode {
   /**
    * @param {Object} options
@@ -20,6 +29,7 @@ export class NxpNode {
     this.description = description;
     this.method = method.toUpperCase();
     this.schema = schema;
+    this.validator = ajv.compile(normalizeSchema(schema));
     this.guard = guard;
     this.handler = handler;
     this.isScopeRoot = false;
@@ -32,33 +42,14 @@ export class NxpNode {
   }
 
   validateParams(params) {
-    const validated = { ...params };
-
-    for (const [key, rule] of Object.entries(this.schema)) {
-      let value = validated[key];
-
-      if (value === undefined && rule.default !== undefined) {
-        value = rule.default;
-        validated[key] = value;
-      }
-
-      if (value === undefined || value === null || value === '') {
-        if (rule.required) {
-          throw new Error(`400: Parameter '${key}' is required.`);
-        }
-        continue;
-      }
-
-      if (rule.type && typeof value !== rule.type) {
-        throw new Error(`400: Parameter '${key}' must be a ${rule.type}.`);
-      }
-
-      if (rule.enum && !rule.enum.includes(value)) {
-        throw new Error(`400: Parameter '${key}' must be one of: ${rule.enum.join(', ')}.`);
-      }
+    if (!this.validator(params)) {
+      const details = this.validator.errors
+        .map((error) => `${error.instancePath || '$'} ${error.message}`)
+        .join('; ');
+      throw new Error(`400: ${details}.`);
     }
 
-    return validated;
+    return params;
   }
 
   isLeaf() {
@@ -105,4 +96,25 @@ export class NxpNode {
 
     return manifest;
   }
+}
+
+function normalizeSchema(schema) {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return {};
+
+  const isJsonSchema = [
+    'type', 'properties', 'required', 'items', '$defs', 'definitions',
+    '$ref', 'allOf', 'anyOf', 'oneOf', 'additionalProperties'
+  ].some((keyword) => Object.hasOwn(schema, keyword));
+
+  if (isJsonSchema) return schema;
+
+  const properties = {};
+  const required = [];
+  for (const [key, rule] of Object.entries(schema)) {
+    const { required: isRequired, ...normalizedRule } = rule || {};
+    properties[key] = normalizedRule;
+    if (isRequired) required.push(key);
+  }
+
+  return { type: 'object', properties, required };
 }
