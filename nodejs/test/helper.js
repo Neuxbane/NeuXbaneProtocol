@@ -3,13 +3,39 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const LOCK_FILE = path.join(__dirname, '.counter.lock');
 
 export const PORT = process.env.PORT || 3000;
 export const BASE_URL = process.env.TEST_URL || `http://localhost:${PORT}`;
 export const WS_URL = BASE_URL.replace(/^http/, 'ws');
 
 let checked = false;
+
+/**
+ * Serialize tests that mutate shared server state (a background service, the
+ * uploads directory, a form collection, ...) across parallel test files.
+ */
+export async function withLock(name, fn) {
+  const lockFile = path.join(__dirname, `.${name}.lock`);
+  const start = Date.now();
+  while (true) {
+    try {
+      const fd = fs.openSync(lockFile, 'wx');
+      fs.closeSync(fd);
+      break;
+    } catch {
+      if (Date.now() - start > 20000) {
+        try { fs.unlinkSync(lockFile); } catch {}
+      }
+      await new Promise((r) => setTimeout(r, 40));
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    try { fs.unlinkSync(lockFile); } catch {}
+  }
+}
 
 export async function ensureServerRunning() {
   if (checked) return;
@@ -42,23 +68,5 @@ export async function getAuthCookie(username = 'alice', role = 'admin') {
 }
 
 export async function withCounterLock(fn) {
-  const start = Date.now();
-  while (true) {
-    try {
-      const fd = fs.openSync(LOCK_FILE, 'wx');
-      fs.closeSync(fd);
-      break;
-    } catch {
-      if (Date.now() - start > 10000) {
-        try { fs.unlinkSync(LOCK_FILE); } catch {}
-      }
-      await new Promise((r) => setTimeout(r, 40));
-    }
-  }
-
-  try {
-    return await fn();
-  } finally {
-    try { fs.unlinkSync(LOCK_FILE); } catch {}
-  }
+  return withLock('counter', fn);
 }

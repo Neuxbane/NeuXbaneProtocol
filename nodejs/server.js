@@ -144,15 +144,21 @@ const rootNode = await buildTree(DEFINE_DIR);
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = url.pathname.replace(/\/+$/, '') || '/';
+  const contentType = (req.headers['content-type'] || '').toLowerCase();
+  const isMultipart = contentType.startsWith('multipart/form-data');
   res.setHeader('Content-Type', 'application/json');
   const session = getOrCreateSession(req, res);
 
+  let rawBody = Buffer.alloc(0);
   let body = {};
   if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
     const buffers = [];
     for await (const chunk of req) buffers.push(chunk);
-    const raw = Buffer.concat(buffers).toString();
-    if (raw) {
+    rawBody = Buffer.concat(buffers);
+
+    // Multipart payloads are parsed by the handler (e.g. uploadService), not here.
+    if (!isMultipart && rawBody.length) {
+      const raw = rawBody.toString('utf8');
       try {
         body = JSON.parse(raw);
       } catch {
@@ -197,7 +203,26 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify({ error: error.message }));
   }
 
-  const ctx = { req, res, params: validatedParams, session, targetNode, pathname };
+  const ctx = {
+    req,
+    res,
+    params: validatedParams,
+    query: queryParams,
+    rawBody,
+    session,
+    targetNode,
+    pathname,
+    setHeader: (name, value) => res.setHeader(name, value),
+    respond: (status, data) => {
+      if (res.writableEnded) return;
+      if (!res.headersSent) res.writeHead(status);
+      if (typeof data === 'string' || Buffer.isBuffer(data)) {
+        res.end(data);
+      } else {
+        res.end(JSON.stringify(data));
+      }
+    }
+  };
 
   try {
     for (const step of pipeline) {
@@ -217,12 +242,17 @@ const server = http.createServer(async (req, res) => {
       ? await targetNode.handler(ctx)
       : { message: `Node at '${pathname}' ready.`, children: Array.from(targetNode.children.keys()) };
 
+    // A handler may take over the response (streaming, binary, custom status).
+    if (res.writableEnded || res.headersSent) return;
+
     res.writeHead(200);
     res.end(JSON.stringify(result));
   } catch (error) {
-    let status = 500;
-    if (error.message.startsWith('401')) status = 401;
-    else if (error.message.startsWith('403')) status = 403;
+    // Guards and handlers may throw "NNN: message" to signal an HTTP status.
+    const statusMatch = /^(\d{3}):/.exec(error.message || '');
+    const status = statusMatch ? Number(statusMatch[1]) : 500;
+
+    if (res.writableEnded || res.headersSent) return;
 
     res.writeHead(status);
     res.end(JSON.stringify({ error: error.message }));

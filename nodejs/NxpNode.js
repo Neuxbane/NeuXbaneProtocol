@@ -243,12 +243,8 @@ export class NxpNode {
 function normalizeSchema(schema) {
   if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return {};
 
-  const isJsonSchema = [
-    'type', 'properties', 'required', 'items', '$defs', 'definitions',
-    '$ref', 'allOf', 'anyOf', 'oneOf', 'additionalProperties'
-  ].some((keyword) => Object.hasOwn(schema, keyword));
-
-  if (isJsonSchema) return schema;
+  // Raw JSON Schema is passed through (with the friendly `limit` alias applied).
+  if (isJsonSchema(schema)) return normalizeArrayLimits(schema);
 
   const properties = {};
   const required = [];
@@ -258,5 +254,74 @@ function normalizeSchema(schema) {
     if (isRequired) required.push(key);
   }
 
-  return { type: 'object', properties, required };
+  return normalizeArrayLimits({ type: 'object', properties, required });
+}
+
+/**
+ * Distinguish a raw JSON Schema document from the shorthand field map.
+ * Only unambiguous JSON Schema keywords count, so a shorthand field that
+ * happens to be named `items`, `type`, `required`, etc. is still treated
+ * as a field rather than a schema.
+ */
+function isJsonSchema(schema) {
+  return (
+    typeof schema.type === 'string' ||
+    typeof schema.$ref === 'string' ||
+    (schema.properties && typeof schema.properties === 'object') ||
+    (schema.$defs && typeof schema.$defs === 'object') ||
+    (schema.definitions && typeof schema.definitions === 'object') ||
+    Array.isArray(schema.required) ||
+    Array.isArray(schema.allOf) ||
+    Array.isArray(schema.anyOf) ||
+    Array.isArray(schema.oneOf) ||
+    typeof schema.additionalProperties === 'boolean' ||
+    (schema.not && typeof schema.not === 'object')
+  );
+}
+
+/**
+ * Accept a friendly `limit` on array schemas as an alias for `maxItems`.
+ * Applies recursively to array items and object properties.
+ */
+function normalizeArrayLimits(schema) {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return schema;
+
+  if (schema.type === 'array' && schema.limit != null && schema.maxItems == null) {
+    schema.maxItems = schema.limit;
+  }
+  delete schema.limit;
+
+  if (schema.items && typeof schema.items === 'object' && !Array.isArray(schema.items)) {
+    normalizeArrayLimits(schema.items);
+  } else if (Array.isArray(schema.items)) {
+    schema.items.forEach(normalizeArrayLimits);
+  }
+
+  if (schema.properties && typeof schema.properties === 'object') {
+    for (const value of Object.values(schema.properties)) {
+      normalizeArrayLimits(value);
+    }
+  }
+
+  for (const keyword of ['allOf', 'anyOf', 'oneOf']) {
+    if (Array.isArray(schema[keyword])) schema[keyword].forEach(normalizeArrayLimits);
+  }
+
+  return schema;
+}
+
+/**
+ * Build an array schema with an optional length cap.
+ * @param {Object} items - Schema for each array entry.
+ * @param {Object} [options]
+ * @param {number} [options.minItems] - Minimum number of entries.
+ * @param {number} [options.maxItems] - Maximum number of entries (omitted = unlimited).
+ * @param {number} [options.limit] - Alias for maxItems.
+ */
+export function arrayOf(items, { minItems, maxItems, limit } = {}) {
+  const schema = { type: 'array', items };
+  const cap = maxItems ?? limit;
+  if (minItems != null) schema.minItems = minItems;
+  if (cap != null) schema.maxItems = cap;
+  return schema;
 }

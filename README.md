@@ -15,6 +15,8 @@ The example implementation is in `nodejs/`.
 - Session state is stored in an encrypted, stateless HTTP-only cookie.
 - Full WebSocket support with scope guards, session access, message schemas, and broadcasting.
 - Runtime background services (e.g. background counter) with real-time WebSocket live-streaming and HTTP control endpoints.
+- Dedicated file uploads: `multipart/form-data` parsed with `busboy` and stored on disk with JSON metadata.
+- Array inputs with an optional length cap (`arrayOf(..., { maxItems })` or a friendly `limit` alias).
 - Mirrored test suite in `test/` that tests against the running server.
 
 ## Directory Structure
@@ -24,7 +26,9 @@ nodejs/
 ├── NxpNode.js
 ├── server.js
 ├── services/
-│   └── counterService.js     # Background runtime state manager
+│   ├── counterService.js     # Background runtime state manager
+│   ├── uploadService.js      # Multipart file parsing and disk storage
+│   └── formService.js        # Bounded/unbounded multi-item collections
 ├── define/
 │   ├── index.js              # /
 │   ├── login.js              # POST /login
@@ -34,6 +38,17 @@ nodejs/
 │   │   ├── index.js          # /auth authentication guard
 │   │   ├── live.js           # WS /auth/live (protected real-time stream)
 │   │   ├── profile.js        # GET /auth/profile
+│   │   ├── upload/
+│   │   │   ├── index.js      # GET /auth/upload (upload hub)
+│   │   │   ├── file.js       # POST /auth/upload/file (multipart upload)
+│   │   │   ├── list.js       # GET /auth/upload/list
+│   │   │   ├── download.js   # GET /auth/upload/download
+│   │   │   └── delete.js     # POST /auth/upload/delete
+│   │   ├── form/
+│   │   │   ├── index.js      # GET /auth/form (multi-item hub)
+│   │   │   ├── add.js        # POST /auth/form/add (bounded array)
+│   │   │   ├── unbounded.js  # POST /auth/form/unbounded (unlimited array)
+│   │   │   └── clear.js      # POST /auth/form/clear
 │   │   └── admin/
 │   │       ├── index.js      # /auth/admin admin guard
 │   │       └── users.js      # GET /auth/admin/users
@@ -43,7 +58,7 @@ nodejs/
 │       ├── stop.js           # POST /counter/stop
 │       └── reset.js          # POST /counter/reset
 └── test/                     # Mirrored test suite
-    ├── helper.js             # Server liveness check & auth helper
+    ├── helper.js             # Server liveness check, auth & lock helpers
     ├── index.test.js
     ├── login.test.js
     ├── logout.test.js
@@ -52,6 +67,17 @@ nodejs/
     │   ├── index.test.js
     │   ├── live.test.js
     │   ├── profile.test.js
+    │   ├── upload/
+    │   │   ├── index.test.js
+    │   │   ├── file.test.js
+    │   │   ├── list.test.js
+    │   │   ├── download.test.js
+    │   │   └── delete.test.js
+    │   ├── form/
+    │   │   ├── index.test.js
+    │   │   ├── add.test.js
+    │   │   ├── unbounded.test.js
+    │   │   └── clear.test.js
     │   └── admin/
     │       ├── index.test.js
     │       └── users.test.js
@@ -130,6 +156,61 @@ curl -i -b cookies.txt -c cookies.txt -X POST http://localhost:3000/logout
 
 A regular member can log in by omitting the role or setting it to `member`. That user can access `/auth/profile` but receives `403 Forbidden` from `/auth/admin/users`.
 
+## File Uploads
+
+Uploads live behind the `/auth` guard. Send files as `multipart/form-data` using the `file` field; any other text field (for example `tags` or `folder`) is stored as metadata. Multiple files can be sent in a single request.
+
+```bash
+# Upload a file with metadata
+curl -b cookies.txt \
+  -F "file=@./README.md" \
+  -F "tags=demo, docs" \
+  -F "folder=notes" \
+  http://localhost:3000/auth/upload/file
+
+# List stored files
+curl -b cookies.txt http://localhost:3000/auth/upload/list
+
+# Download the original bytes
+curl -b cookies.txt -OJ "http://localhost:3000/auth/upload/download?id=<file-id>"
+
+# Delete a file
+curl -b cookies.txt \
+  -H 'Content-Type: application/json' \
+  -d '{"id":"<file-id>"}' \
+  http://localhost:3000/auth/upload/delete
+```
+
+Files are written to `nodejs/uploads/` with a sanitized original name, a unique stored name, size, MIME type, and a `sha256` checksum. Each file gets a `<id>.meta.json` sidecar. Configuration environment variables:
+
+- `NXP_UPLOAD_DIR` - storage directory (defaults to `nodejs/uploads/`)
+- `NXP_MAX_FILE_SIZE` - per-file cap in bytes (defaults to 10 MB, returns `413`)
+- `NXP_MAX_FILES` - files per request (defaults to 10, returns `413`)
+
+## Multi-Item Forms
+
+The `/auth/form` scope appends arrays of entries to a collection. `/auth/form/add` is bounded by `maxItems` (default 5, override with `NXP_FORM_LIMIT`), while `/auth/form/unbounded` accepts any number.
+
+```bash
+# Bounded: rejects requests that exceed the limit with 400
+curl -b cookies.txt \
+  -H 'Content-Type: application/json' \
+  -d '{"items":[{"name":"Ada"},"Grace",42]}' \
+  http://localhost:3000/auth/form/add
+
+# Unbounded: no maxItems
+curl -b cookies.txt \
+  -H 'Content-Type: application/json' \
+  -d '{"items":["a","b","c","d","e","f","g"]}' \
+  http://localhost:3000/auth/form/unbounded
+
+# Clear either collection
+curl -b cookies.txt \
+  -H 'Content-Type: application/json' \
+  -d '{"target":"bounded"}' \
+  http://localhost:3000/auth/form/clear
+```
+
 ## Route Discovery
 
 Add `?nxp` to inspect a route definition:
@@ -174,11 +255,17 @@ export default new NxpNode({
 Handlers receive a context object containing:
 
 - `ctx.params` - validated request parameters
+- `ctx.query` - raw query parameters (even when overridden in the body)
+- `ctx.rawBody` - the raw request body as a `Buffer` (used for `multipart/form-data`)
 - `ctx.session` - session access
 - `ctx.req` - Node.js request
 - `ctx.res` - Node.js response
 - `ctx.targetNode` - resolved node
 - `ctx.pathname` - requested path
+- `ctx.setHeader(name, value)` - set a response header
+- `ctx.respond(status, data)` - take over the response (JSON, string, or `Buffer`)
+
+A handler that writes to `ctx.res` itself (streaming, binary, or a custom status) skips the default JSON response.
 
 ## Schema Support
 
@@ -215,6 +302,39 @@ schema: {
   role: { type: 'string', enum: ['member', 'admin'], default: 'member' }
 }
 ```
+
+A shorthand field that is literally named `type`, `required`, or `items` is still treated as a field; raw JSON Schema is only detected when an unambiguous schema keyword (like a string `type`, `properties`, or `$ref`) is present.
+
+### Array Inputs and Limits
+
+Accept an array of entries with `arrayOf()`, and cap its length with `maxItems` (or the shorter `limit` alias). Omitting the cap makes the array unbounded.
+
+```js
+import { NxpNode, arrayOf } from '../NxpNode.js';
+
+// Capped at 5 entries.
+schema: {
+  type: 'object',
+  properties: {
+    items: arrayOf(
+      { oneOf: [{ type: 'object' }, { type: 'string' }, { type: 'number' }] },
+      { minItems: 1, maxItems: 5 }
+    )
+  },
+  required: ['items'],
+  additionalProperties: false
+}
+```
+
+```js
+// No cap: any number of entries is accepted.
+schema: {
+  type: 'object',
+  properties: { items: arrayOf({ type: 'string' }, { minItems: 1 }) }
+}
+```
+
+`limit` is normalized to `maxItems` anywhere in a schema, so `{ type: 'array', items: {...}, limit: 5 }` works too. Ajv enforces both `minItems` and `maxItems`; the included `/auth/form/add` (bounded) and `/auth/form/unbounded` routes demonstrate each mode.
 
 Invalid input returns HTTP `400` with validation details.
 
