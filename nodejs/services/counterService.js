@@ -21,11 +21,16 @@ class CounterService extends EventEmitter {
   }
 
   start(intervalMs = 1000) {
+    const newInterval = Math.max(50, Number(intervalMs) || 1000);
+
     if (this.isRunning) {
-      return this.getState();
+      if (this.intervalMs === newInterval) {
+        return this.getState();
+      }
+      clearInterval(this.intervalId);
     }
 
-    this.intervalMs = Math.max(50, Number(intervalMs) || 1000);
+    this.intervalMs = newInterval;
     this.intervalId = setInterval(() => {
       this.count += 1;
       this.emit('tick', this.getState());

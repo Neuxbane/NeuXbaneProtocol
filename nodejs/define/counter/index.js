@@ -57,18 +57,15 @@ export default new NxpNode({
     message: (ctx, data) => {
       switch (data.action) {
         case 'start': {
-          const state = counterService.start(data.intervalMs);
-          ctx.send({ type: 'started', ...state });
+          counterService.start(data.intervalMs);
           break;
         }
         case 'stop': {
-          const state = counterService.stop();
-          ctx.send({ type: 'stopped', ...state });
+          counterService.stop();
           break;
         }
         case 'reset': {
-          const state = counterService.reset(data.to ?? 0);
-          ctx.send({ type: 'reset', ...state });
+          counterService.reset(data.to ?? 0);
           break;
         }
         case 'get':

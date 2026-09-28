@@ -7,41 +7,59 @@ The example implementation is in `nodejs/`.
 ## Core Ideas
 
 - The `define/` directory becomes the API tree.
-- Each `NxpNode` describes an operation or scope.
+- Each `NxpNode` describes an operation or scope (HTTP or WebSocket).
 - `index.js` files define scope roots and can provide guards.
 - Child scopes inherit through the resolved request pipeline.
-- Ajv validates request parameters using JSON Schema.
+- Ajv validates request parameters and WebSocket messages using JSON Schema.
 - `?nxp` exposes machine-readable route metadata.
 - Session state is stored in an encrypted, stateless HTTP-only cookie.
+- Full WebSocket support with scope guards, session access, message schemas, and broadcasting.
+- Runtime background services (e.g. background counter) with real-time WebSocket live-streaming and HTTP control endpoints.
+- Mirrored test suite in `test/` that tests against the running server.
 
-A definition such as:
-
-```text
-define/auth/admin/users.js
-```
-
-maps to:
-
-```text
-GET /auth/admin/users
-```
-
-## Example Tree
+## Directory Structure
 
 ```text
 nodejs/
 ├── NxpNode.js
 ├── server.js
-└── define/
-    ├── index.js              # /
-    ├── login.js              # POST /login
-    ├── logout.js             # POST /logout
-    └── auth/
-        ├── index.js          # /auth authentication guard
-        ├── profile.js        # GET /auth/profile
-        └── admin/
-            ├── index.js      # /auth/admin admin guard
-            └── users.js      # GET /auth/admin/users
+├── services/
+│   └── counterService.js     # Background runtime state manager
+├── define/
+│   ├── index.js              # /
+│   ├── login.js              # POST /login
+│   ├── logout.js             # POST /logout
+│   ├── ws.js                 # WS /ws (public real-time stream)
+│   ├── auth/
+│   │   ├── index.js          # /auth authentication guard
+│   │   ├── live.js           # WS /auth/live (protected real-time stream)
+│   │   ├── profile.js        # GET /auth/profile
+│   │   └── admin/
+│   │       ├── index.js      # /auth/admin admin guard
+│   │       └── users.js      # GET /auth/admin/users
+│   └── counter/
+│       ├── index.js          # GET /counter & WS /counter (live tick stream)
+│       ├── start.js          # POST /counter/start
+│       ├── stop.js           # POST /counter/stop
+│       └── reset.js          # POST /counter/reset
+└── test/                     # Mirrored test suite
+    ├── helper.js             # Server liveness check & auth helper
+    ├── index.test.js
+    ├── login.test.js
+    ├── logout.test.js
+    ├── ws.test.js
+    ├── auth/
+    │   ├── index.test.js
+    │   ├── live.test.js
+    │   ├── profile.test.js
+    │   └── admin/
+    │       ├── index.test.js
+    │       └── users.test.js
+    └── counter/
+        ├── index.test.js
+        ├── start.test.js
+        ├── stop.test.js
+        └── reset.test.js
 ```
 
 ## Requirements
@@ -61,6 +79,22 @@ The server listens on:
 
 ```text
 http://localhost:3000
+```
+
+## Running Tests
+
+The test suite tests live endpoints against an active server. It automatically checks if the server is running before executing; if the server is not running, it outputs a friendly notice and exits without running tests.
+
+1. Start the server in one terminal:
+```bash
+cd nodejs
+npm start
+```
+
+2. Run the tests in another terminal:
+```bash
+cd nodejs
+npm test
 ```
 
 For local development, `NXP_SESSION_SECRET` is optional. The server generates a temporary secret when it is missing, which invalidates existing sessions after a restart. Use a stable secret outside development.
