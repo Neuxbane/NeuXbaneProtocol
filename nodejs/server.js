@@ -3,6 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { WebSocketServer } from 'ws';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFINE_DIR = path.join(__dirname, 'define');
@@ -48,11 +49,30 @@ function decryptSession(value) {
   }
 }
 
-function getOrCreateSession(req, res) {
+function getSessionState(req) {
   const cookieHeader = req.headers.cookie || '';
   const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${SESSION_COOKIE}=([^;]+)`));
   const stored = match ? decryptSession(match[1]) : null;
-  const state = stored || { id: crypto.randomUUID(), data: {} };
+  return stored || { id: crypto.randomUUID(), data: {} };
+}
+
+function getSessionFromRequest(req) {
+  const state = getSessionState(req);
+  return {
+    id: state.id,
+    get: (key) => state.data[key],
+    set: (key, value) => {
+      state.data[key] = value;
+    },
+    delete: (key) => delete state.data[key],
+    clear: () => {
+      state.data = {};
+    }
+  };
+}
+
+function getOrCreateSession(req, res) {
+  const state = getSessionState(req);
   let cleared = false;
 
   const session = {
@@ -159,6 +179,16 @@ const server = http.createServer(async (req, res) => {
     return res.end(JSON.stringify(targetNode.describe(targetStep.path), null, 2));
   }
 
+  if (targetNode.isWebSocket && !targetNode.handler) {
+    res.writeHead(426, {
+      'Upgrade': 'websocket',
+      'Connection': 'Upgrade'
+    });
+    return res.end(JSON.stringify({
+      error: `Route '${pathname}' is a WebSocket endpoint. Connect using WebSocket (ws:// or wss://).`
+    }));
+  }
+
   let validatedParams;
   try {
     validatedParams = targetNode.validateParams(params);
@@ -199,6 +229,66 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(3000, () => {
-  console.log('Neuxbane Protocol Server running on http://localhost:3000');
+const wss = new WebSocketServer({ noServer: true });
+
+server.on('upgrade', async (req, socket, head) => {
+  try {
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    const pathname = url.pathname.replace(/\/+$/, '') || '/';
+    const segments = pathname === '/' ? [] : pathname.slice(1).split('/').filter(Boolean);
+    const pipeline = rootNode.resolvePipeline(segments);
+
+    if (!pipeline) {
+      socket.write('HTTP/1.1 404 Not Found\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nRoute not found\r\n');
+      socket.destroy();
+      return;
+    }
+
+    const targetStep = pipeline[pipeline.length - 1];
+    const targetNode = targetStep.node;
+
+    if (!targetNode.isWebSocket) {
+      socket.write('HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nEndpoint is not a WebSocket route\r\n');
+      socket.destroy();
+      return;
+    }
+
+    const session = getSessionFromRequest(req);
+    const queryParams = Object.fromEntries(url.searchParams.entries());
+
+    let validatedParams = queryParams;
+    try {
+      validatedParams = targetNode.validateParams(queryParams);
+    } catch (error) {
+      socket.write(`HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n${error.message}\r\n`);
+      socket.destroy();
+      return;
+    }
+
+    const ctx = { req, params: validatedParams, session, targetNode, pathname };
+
+    for (const step of pipeline) {
+      if (step.node.isScopeRoot && typeof step.node.guard === 'function') {
+        await step.node.guard(ctx);
+      }
+    }
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      targetNode.handleWebSocket(ws, ctx);
+    });
+  } catch (error) {
+    let status = 'HTTP/1.1 500 Internal Server Error';
+    if (error.message?.startsWith('401')) status = 'HTTP/1.1 401 Unauthorized';
+    else if (error.message?.startsWith('403')) status = 'HTTP/1.1 403 Forbidden';
+
+    socket.write(`${status}\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\n${error.message}\r\n`);
+    socket.destroy();
+  }
 });
+
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Neuxbane Protocol Server running on http://localhost:${PORT}`);
+});
+
+export { server, wss, rootNode, buildTree, encryptSession, decryptSession, getSessionFromRequest, getSessionState };
