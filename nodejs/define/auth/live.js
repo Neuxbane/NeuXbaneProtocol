@@ -1,4 +1,5 @@
 import { NxpNode } from '../../NxpNode.js';
+import { counterService } from '../../services/counterService.js';
 
 export default new NxpNode({
   name: 'authenticated_live_feed',
@@ -7,9 +8,10 @@ export default new NxpNode({
   messageSchema: {
     type: 'object',
     properties: {
+      action: { type: 'string', enum: ['message', 'get'] },
       message: { type: 'string', minLength: 1 }
     },
-    required: ['message'],
+    required: ['action'],
     additionalProperties: false
   },
   ws: {
@@ -24,6 +26,15 @@ export default new NxpNode({
     },
     message: (ctx, data) => {
       const user = ctx.session.get('user');
+
+      if (data.action === 'get') {
+        ctx.send({
+          type: 'count',
+          ...counterService.getState()
+        });
+        return;
+      }
+
       ctx.broadcast({
         type: 'chat',
         from: user?.username || 'Anonymous',

@@ -58,7 +58,7 @@ test('Endpoint: /auth/form/unbounded (define/auth/form/unbounded.js)', async (t)
       assert.equal(res.status, 200);
       const data = await res.json();
       assert.equal(data.name, 'form_add_unbounded');
-      const items = data.schema.properties.items;
+      const items = data.schema.request.properties.items;
       assert.equal(items.type, 'array');
       assert.equal(items.maxItems, undefined);
     });

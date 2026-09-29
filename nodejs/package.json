@@ -4,6 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
+    "dev": "NXP_MODE=dev node server.js",
+    "prod": "NXP_MODE=prod node server.js",
     "test": "node --test"
   },
   "dependencies": {

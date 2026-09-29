@@ -6,11 +6,25 @@ export default new NxpNode({
   description: 'Starts the background counting script.',
   method: 'POST',
   schema: {
-    type: 'object',
-    properties: {
-      intervalMs: { type: 'integer', minimum: 50, default: 1000 }
+    request: {
+      type: 'object',
+      properties: {
+        intervalMs: { type: 'integer', minimum: 50, default: 1000 }
+      },
+      additionalProperties: false
     },
-    additionalProperties: false
+    response: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        count: { type: 'integer' },
+        running: { type: 'boolean' },
+        intervalMs: { type: 'integer' }
+      },
+      required: ['success', 'message', 'count', 'running', 'intervalMs'],
+      additionalProperties: false
+    }
   },
   handler: async (ctx) => {
     const intervalMs = ctx.params.intervalMs || 1000;

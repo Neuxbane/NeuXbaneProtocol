@@ -43,6 +43,7 @@ export async function ensureServerRunning() {
     const res = await fetch(`${BASE_URL}/`, { signal: AbortSignal.timeout(1000) });
     if (res.ok || res.status < 500) {
       checked = true;
+      await ensureDevMode();
       return;
     }
   } catch {
@@ -53,9 +54,34 @@ export async function ensureServerRunning() {
   console.log(`[Neuxbane Protocol Test] Server is NOT running at ${BASE_URL}`);
   console.log(`Tests are configured to verify live endpoints.`);
   console.log(`Skipping tests. Please start the server in another terminal:`);
-  console.log(`  cd nodejs && npm start`);
+  console.log(`  cd nodejs && npm run dev`);
   console.log(`======================================================\n`);
   process.exit(0);
+}
+
+/**
+ * Tests must run against a dev-mode server so response schemas are enforced.
+ * If the server is running in prod mode, refuse to run the suite.
+ */
+export async function ensureDevMode() {
+  let mode;
+  try {
+    const res = await fetch(`${BASE_URL}/?nxp`, { signal: AbortSignal.timeout(1000) });
+    const manifest = await res.json();
+    mode = manifest.mode;
+  } catch {
+    return;
+  }
+
+  if (mode && mode !== 'dev') {
+    console.log(`\n======================================================`);
+    console.log(`[Neuxbane Protocol Test] Server is running in '${mode}' mode at ${BASE_URL}`);
+    console.log(`Tests require dev mode (response schema validation enabled).`);
+    console.log(`Restart the server with:`);
+    console.log(`  cd nodejs && npm run dev`);
+    console.log(`======================================================\n`);
+    process.exit(1);
+  }
 }
 
 export async function getAuthCookie(username = 'alice', role = 'admin') {

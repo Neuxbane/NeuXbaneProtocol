@@ -59,8 +59,8 @@ test('Endpoint: /auth/upload/download (define/auth/upload/download.js)', async (
       const data = await res.json();
       assert.equal(data.name, 'download_upload');
       assert.equal(data.method, 'GET');
-      assert.equal(data.schema.id.type, 'string');
-      assert.equal(data.schema.id.required, true);
+      assert.equal(data.schema.request.id.type, 'string');
+      assert.equal(data.schema.request.id.required, true);
     });
   });
 });

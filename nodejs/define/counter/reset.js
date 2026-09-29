@@ -6,11 +6,25 @@ export default new NxpNode({
   description: 'Resets the background counter value.',
   method: 'POST',
   schema: {
-    type: 'object',
-    properties: {
-      to: { type: 'integer', default: 0 }
+    request: {
+      type: 'object',
+      properties: {
+        to: { type: 'integer', default: 0 }
+      },
+      additionalProperties: false
     },
-    additionalProperties: false
+    response: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        count: { type: 'integer' },
+        running: { type: 'boolean' },
+        intervalMs: { type: 'integer' }
+      },
+      required: ['success', 'message', 'count', 'running', 'intervalMs'],
+      additionalProperties: false
+    }
   },
   handler: async (ctx) => {
     const to = ctx.params.to ?? 0;

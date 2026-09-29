@@ -4,6 +4,9 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { NXP_MODE, isDev, NxpNode } from './NxpNode.js';
+import { uploadService } from './services/uploadService.js';
+import { signFileRef, linkUrl } from './services/fileLink.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DEFINE_DIR = path.join(__dirname, 'define');
@@ -127,12 +130,31 @@ async function buildTree(dirPath) {
 
     if (entry.isDirectory()) {
       const subTree = await buildTree(fullPath);
-      if (subTree && rootNode) rootNode.mount(entry.name, subTree);
+      if (subTree) {
+        // A directory without its own `index.js` still needs a mount point so
+        // its children (e.g. `chunk/[index].js`) are reachable. Synthesize a
+        // pass-through scope node in that case.
+        if (!rootNode) {
+          rootNode = new NxpNode({
+            name: path.basename(dirPath),
+            description: `Scope '${path.basename(dirPath)}'.`
+          });
+          rootNode.isScopeRoot = true;
+        }
+        rootNode.mount(entry.name, subTree);
+      }
     } else if (entry.isFile() && entry.name.endsWith('.js')) {
       const segment = entry.name.replace(/\.js$/, '');
       const mod = await import(pathToFileURL(fullPath));
       mod.default.isScopeRoot = false;
-      if (rootNode) rootNode.mount(segment, mod.default);
+      if (!rootNode) {
+        rootNode = new NxpNode({
+          name: path.basename(dirPath),
+          description: `Scope '${path.basename(dirPath)}'.`
+        });
+        rootNode.isScopeRoot = true;
+      }
+      rootNode.mount(segment, mod.default);
     }
   }
 
@@ -149,9 +171,22 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Content-Type', 'application/json');
   const session = getOrCreateSession(req, res);
 
+  // Resolve the route first so a streaming node (e.g. a chunk upload) can
+  // consume the raw request body itself instead of having it buffered here.
+  const segments = pathname === '/' ? [] : pathname.slice(1).split('/').filter(Boolean);
+  const pipeline = rootNode.resolvePipeline(segments);
+
+  if (!pipeline) {
+    res.writeHead(404);
+    return res.end(JSON.stringify({ error: `Route '${pathname}' not found in NXP tree.` }));
+  }
+
+  const targetStep = pipeline[pipeline.length - 1];
+  const targetNode = targetStep.node;
+
   let rawBody = Buffer.alloc(0);
   let body = {};
-  if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+  if (['POST', 'PUT', 'PATCH'].includes(req.method) && !targetNode.streamBody) {
     const buffers = [];
     for await (const chunk of req) buffers.push(chunk);
     rawBody = Buffer.concat(buffers);
@@ -168,17 +203,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   const queryParams = Object.fromEntries(url.searchParams.entries());
-  const params = { ...queryParams, ...body };
-  const segments = pathname === '/' ? [] : pathname.slice(1).split('/').filter(Boolean);
-  const pipeline = rootNode.resolvePipeline(segments);
-
-  if (!pipeline) {
-    res.writeHead(404);
-    return res.end(JSON.stringify({ error: `Route '${pathname}' not found in NXP tree.` }));
-  }
-
-  const targetStep = pipeline[pipeline.length - 1];
-  const targetNode = targetStep.node;
+  const params = { ...queryParams, ...body, ...targetStep.params };
 
   if (url.searchParams.has('nxp')) {
     res.writeHead(200);
@@ -201,6 +226,24 @@ const server = http.createServer(async (req, res) => {
   } catch (error) {
     res.writeHead(400);
     return res.end(JSON.stringify({ error: error.message }));
+  }
+
+  // Resolve `file`-typed request fields to stored records so the handler never
+  // touches upload mechanics. A field may be a signed link token or a file id.
+  if (targetNode.requestFileFields.length) {
+    try {
+      for (const field of targetNode.requestFileFields) {
+        const ref = validatedParams[field];
+        if (ref == null) continue;
+        validatedParams[field] = await uploadService.resolveRef(
+          typeof ref === 'string' ? ref : ref.id
+        );
+      }
+    } catch (error) {
+      const statusMatch = /^(\d{3}):/.exec(error.message || '');
+      res.writeHead(statusMatch ? Number(statusMatch[1]) : 400);
+      return res.end(JSON.stringify({ error: error.message }));
+    }
   }
 
   const ctx = {
@@ -245,8 +288,25 @@ const server = http.createServer(async (req, res) => {
     // A handler may take over the response (streaming, binary, custom status).
     if (res.writableEnded || res.headersSent) return;
 
+    // Serialize `file`-typed response fields into stateless signed links so the
+    // handler only ever returns `{ id }` (or a record) and never builds URLs.
+    if (targetNode.responseFileFields.length && result && typeof result === 'object') {
+      for (const field of targetNode.responseFileFields) {
+        const value = result[field];
+        if (value == null) continue;
+        const id = typeof value === 'string' ? value : value.id;
+        if (!id) continue;
+        const { token, expiresAt } = signFileRef(id);
+        result[field] = { id, url: linkUrl(token), expiresAt };
+      }
+    }
+
+    // Dev mode: verify the outgoing body against the node's response contract.
+    // Prod mode: skip entirely (no overhead, no risk to live traffic).
+    const validatedResult = targetNode.validateResponse(result);
+
     res.writeHead(200);
-    res.end(JSON.stringify(result));
+    res.end(JSON.stringify(validatedResult));
   } catch (error) {
     // Guards and handlers may throw "NNN: message" to signal an HTTP status.
     const statusMatch = /^(\d{3}):/.exec(error.message || '');
@@ -319,6 +379,11 @@ server.on('upgrade', async (req, socket, head) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Neuxbane Protocol Server running on http://localhost:${PORT}`);
+  console.log(
+    isDev
+      ? `[NXP] mode=dev — response schemas are validated (violations return 500 with details).`
+      : `[NXP] mode=prod — response schema validation is disabled.`
+  );
 });
 
-export { server, wss, rootNode, buildTree, encryptSession, decryptSession, getSessionFromRequest, getSessionState };
+export { server, wss, rootNode, buildTree, encryptSession, decryptSession, getSessionFromRequest, getSessionState, NXP_MODE, isDev };

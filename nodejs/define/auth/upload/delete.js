@@ -6,7 +6,19 @@ export default new NxpNode({
   description: 'Removes a stored file and its metadata by id.',
   method: 'POST',
   schema: {
-    id: { type: 'string', required: true }
+    request: {
+      id: { type: 'string', required: true }
+    },
+    response: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        id: { type: 'string' }
+      },
+      required: ['success', 'message', 'id'],
+      additionalProperties: false
+    }
   },
   handler: async (ctx) => {
     const record = await uploadService.remove(ctx.params.id);

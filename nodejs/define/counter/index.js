@@ -6,6 +6,19 @@ export default new NxpNode({
   description: 'Runtime background counter root. Returns status over HTTP GET and streams live updates over WebSocket.',
   method: 'ANY',
   websocket: true,
+  schema: {
+    response: {
+      type: 'object',
+      properties: {
+        message: { type: 'string' },
+        count: { type: 'integer' },
+        running: { type: 'boolean' },
+        intervalMs: { type: 'integer' }
+      },
+      required: ['message', 'count', 'running', 'intervalMs'],
+      additionalProperties: false
+    }
+  },
   messageSchema: {
     type: 'object',
     properties: {

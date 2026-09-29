@@ -5,8 +5,19 @@ export default new NxpNode({
   description: 'Sets stateful cookie session. Accepts username and optional role.',
   method: 'POST',
   schema: {
-    username: { type: 'string', required: true },
-    role: { type: 'string', enum: ['member', 'admin'], default: 'member' }
+    request: {
+      username: { type: 'string', required: true },
+      role: { type: 'string', enum: ['member', 'admin'], default: 'member' }
+    },
+    response: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' }
+      },
+      required: ['success', 'message'],
+      additionalProperties: false
+    }
   },
   handler: async (ctx) => {
     const username = ctx.params.username || 'Anonymous';

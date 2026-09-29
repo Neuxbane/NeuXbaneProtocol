@@ -10,15 +10,54 @@ export default new NxpNode({
   description: 'Appends an array of entries to the unbounded collection (no limit).',
   method: 'POST',
   schema: {
-    type: 'object',
-    properties: {
-      items: arrayOf(
-        { oneOf: [{ type: 'object' }, { type: 'string' }, { type: 'number' }] },
-        { minItems: 1 }
-      )
+    request: {
+      type: 'object',
+      properties: {
+        items: arrayOf(
+          { oneOf: [{ type: 'object' }, { type: 'string' }, { type: 'number' }] },
+          { minItems: 1 }
+        )
+      },
+      required: ['items'],
+      additionalProperties: false
     },
-    required: ['items'],
-    additionalProperties: false
+    response: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        added: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              value: {},
+              createdAt: { type: 'string' }
+            },
+            required: ['id', 'createdAt']
+          }
+        },
+        limit: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+        unlimited: { type: 'boolean' },
+        count: { type: 'integer' },
+        remaining: { anyOf: [{ type: 'integer' }, { type: 'null' }] },
+        entries: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              value: {},
+              createdAt: { type: 'string' }
+            },
+            required: ['id', 'createdAt']
+          }
+        }
+      },
+      required: ['success', 'message', 'added', 'limit', 'unlimited', 'count', 'remaining', 'entries'],
+      additionalProperties: false
+    }
   },
   handler: async (ctx) => {
     const added = unboundedFormService.add(ctx.params.items);

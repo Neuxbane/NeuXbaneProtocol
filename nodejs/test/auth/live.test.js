@@ -28,7 +28,7 @@ test('Endpoint: /auth/live (define/auth/live.js)', async (t) => {
     const messages = [];
     await new Promise((resolve, reject) => {
       ws.on('open', () => {
-        ws.send(JSON.stringify({ message: 'Hello secure channel' }));
+        ws.send(JSON.stringify({ action: 'message', message: 'Hello secure channel' }));
       });
       ws.on('message', (data) => {
         messages.push(JSON.parse(data.toString()));

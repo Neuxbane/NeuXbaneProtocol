@@ -85,7 +85,7 @@ test('Endpoint: /auth/form/add (define/auth/form/add.js)', async (t) => {
       assert.equal(res.status, 200);
       const data = await res.json();
       assert.equal(data.name, 'form_add_bounded');
-      const items = data.schema.properties.items;
+      const items = data.schema.request.properties.items;
       assert.equal(items.type, 'array');
       assert.equal(items.maxItems, FORM_LIMIT);
       assert.ok(items.items.oneOf);

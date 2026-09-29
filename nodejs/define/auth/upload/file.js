@@ -8,12 +8,42 @@ export default new NxpNode({
     'any other text field (e.g. "tags", "folder") is stored as metadata.',
   method: 'POST',
   schema: {
-    type: 'object',
-    properties: {
-      tags: { type: 'string' },
-      folder: { type: 'string' }
+    request: {
+      type: 'object',
+      properties: {
+        tags: { type: 'string' },
+        folder: { type: 'string' }
+      },
+      additionalProperties: true
     },
-    additionalProperties: true
+    response: {
+      type: 'object',
+      properties: {
+        success: { type: 'boolean' },
+        message: { type: 'string' },
+        uploadedBy: { type: 'string' },
+        fields: { type: 'object' },
+        files: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              field: { type: 'string' },
+              originalName: { type: 'string' },
+              storedName: { type: 'string' },
+              mimeType: { type: 'string' },
+              size: { type: 'integer' },
+              checksum: { type: 'string' },
+              uploadedAt: { type: 'string' }
+            },
+            required: ['id', 'originalName', 'storedName', 'size', 'checksum']
+          }
+        }
+      },
+      required: ['success', 'message', 'uploadedBy', 'files'],
+      additionalProperties: false
+    }
   },
   handler: async (ctx) => {
     const contentType = ctx.req.headers['content-type'] || '';
