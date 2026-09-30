@@ -35,6 +35,7 @@ export default new NxpNode({
               mimeType: { type: 'string' },
               size: { type: 'integer' },
               checksum: { type: 'string' },
+              deduplicated: { type: 'boolean' },
               uploadedAt: { type: 'string' }
             },
             required: ['id', 'originalName', 'storedName', 'size', 'checksum']

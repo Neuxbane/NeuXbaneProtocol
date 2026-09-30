@@ -14,6 +14,9 @@ export default new NxpNode({
         maxFileSize: { type: 'integer' },
         maxFiles: { type: 'integer' },
         totalBytes: { type: 'integer' },
+        uniqueBlobs: { type: 'integer' },
+        storedBytes: { type: 'integer' },
+        deduplicatedBytes: { type: 'integer' },
         chunkSize: { type: 'integer' },
         files: {
           type: 'array',
@@ -27,6 +30,7 @@ export default new NxpNode({
               mimeType: { type: 'string' },
               size: { type: 'integer' },
               checksum: { type: 'string' },
+              deduplicated: { type: 'boolean' },
               uploadedAt: { type: 'string' }
             },
             required: ['id', 'originalName', 'storedName', 'size', 'checksum']

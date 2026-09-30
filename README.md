@@ -232,11 +232,12 @@ curl -b cookies.txt \
   http://localhost:3000/auth/upload/delete
 ```
 
-Files are written to `nodejs/uploads/` with a sanitized original name, a unique stored name, size, MIME type, and a `sha256` checksum. Each file gets a `<id>.meta.json` sidecar. Configuration environment variables:
+Files are **content-addressed**: the payload is stored once under `nodejs/uploads/blobs/<sha256>` and every upload record references that shared blob. Uploading identical bytes again reuses the existing blob instead of writing a duplicate, so storage does not grow with duplicates. Each upload gets its own `<id>.meta.json` sidecar with a sanitized original name, size, MIME type, and the `sha256` checksum. A blob is only deleted once no metadata record references it; orphaned blobs (e.g. from abandoned uploads) are garbage-collected by the stale sweeper. Configuration environment variables:
 
 - `NXP_UPLOAD_DIR` - storage directory (defaults to `nodejs/uploads/`)
 - `NXP_MAX_FILE_SIZE` - per-file cap in bytes (defaults to 10 MB, returns `413`)
 - `NXP_MAX_FILES` - files per request (defaults to 10, returns `413`)
+- `NXP_BLOB_GC_GRACE` - grace period (ms) before an unreferenced blob is collectable (defaults to 1 hour)
 
 ## Files as Resources
 
@@ -346,12 +347,13 @@ Endpoints:
 | `POST` | `/__nxp/upload/:id/complete` | Assemble + verify; `409` if chunks are missing |
 | `DELETE` | `/__nxp/upload/:id/abort` | Abort and discard the session |
 
-Chunks are stored as indexed parts under `uploads/.chunks/<uploadId>/<index>.part`, so out-of-order and parallel uploads are safe and re-uploading a chunk is idempotent. Completing concatenates the parts in index order, computes the `sha256` checksum, writes the same `<id>.meta.json` sidecar as a normal upload, and removes the session directory. Sessions older than the TTL are swept automatically.
+Chunks are stored as indexed parts under `uploads/.chunks/<uploadId>/<index>.part`, so out-of-order and parallel uploads are safe and re-uploading a chunk is idempotent. Completing concatenates the parts in index order, computes the `sha256` checksum, publishes the payload to the shared content-addressed blob store (reusing an existing blob when the bytes already exist), writes the same `<id>.meta.json` sidecar as a normal upload, and removes the session directory. Sessions older than the TTL are swept automatically.
 
 Configuration environment variables:
 
 - `NXP_CHUNK_SIZE` - chunk size in bytes (defaults to 5 MB)
 - `NXP_CHUNK_TTL` - session time-to-live in milliseconds (defaults to 24 hours)
+- `NXP_BLOB_GC_GRACE` - grace period (ms) before an unreferenced blob is collectable (defaults to 1 hour)
 
 ### Resumable Downloads
 

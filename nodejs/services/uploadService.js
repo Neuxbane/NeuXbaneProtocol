@@ -27,6 +27,18 @@ const SESSION_FILE = 'session.json';
 const CHUNK_DIR = path.join(UPLOAD_DIR, '.chunks');
 const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/**
+ * Content-addressed blob store. Every distinct payload is written exactly once
+ * under `blobs/<sha256>`, and any number of metadata records may reference the
+ * same blob. This removes duplicate storage when the same bytes are uploaded
+ * more than once.
+ */
+const BLOB_DIR_NAME = 'blobs';
+const BLOB_DIR = path.join(UPLOAD_DIR, BLOB_DIR_NAME);
+const TEMP_PREFIX = '.tmp-';
+/** Orphan blobs newer than this are left alone so in-flight uploads aren't swept (1h). */
+const BLOB_GC_GRACE = Number(process.env.NXP_BLOB_GC_GRACE) || 60 * 60 * 1000;
+
 /** Strip path separators and control characters so a name cannot escape the upload dir. */
 export function sanitizeFilename(name = '') {
   const base = path.basename(String(name));
@@ -46,6 +58,25 @@ function assertId(id) {
 
 function metaPath(id) {
   return path.join(UPLOAD_DIR, `${id}${META_SUFFIX}`);
+}
+
+/** Stored (relative) path for a content-addressed blob, e.g. `blobs/<sha256>`. */
+function blobRelPath(hashHex) {
+  return path.posix.join(BLOB_DIR_NAME, hashHex);
+}
+
+/** Absolute path for a content-addressed blob. */
+function blobPath(hashHex) {
+  return path.join(BLOB_DIR, hashHex);
+}
+
+/** Absolute path to a blob from its stored (relative) name, with traversal guard. */
+function resolveStoredPath(storedName) {
+  const resolved = path.resolve(UPLOAD_DIR, storedName);
+  if (resolved !== UPLOAD_DIR && !resolved.startsWith(UPLOAD_DIR + path.sep)) {
+    throw new Error(`400: Invalid stored path for '${storedName}'.`);
+  }
+  return resolved;
 }
 
 function assertUploadId(id) {
@@ -82,7 +113,7 @@ class UploadService extends EventEmitter {
 
   async ensureDir() {
     if (!this.dirReady) {
-      this.dirReady = fsp.mkdir(UPLOAD_DIR, { recursive: true });
+      this.dirReady = fsp.mkdir(BLOB_DIR, { recursive: true });
     }
     return this.dirReady;
   }
@@ -175,9 +206,9 @@ class UploadService extends EventEmitter {
   async #persist(fieldName, stream, info, maxFileSize) {
     const originalName = sanitizeFilename(info.filename || 'file');
     const id = crypto.randomUUID();
-    const extension = path.extname(originalName).slice(0, 16);
-    const storedName = `${id}${extension}`;
-    const target = path.join(UPLOAD_DIR, storedName);
+    // Stream into a unique temp file first: the final blob name is derived from
+    // the content hash, which is only known once the whole file has been read.
+    const temp = path.join(BLOB_DIR, `${TEMP_PREFIX}${id}`);
 
     const hash = crypto.createHash('sha256');
     let size = 0;
@@ -191,14 +222,22 @@ class UploadService extends EventEmitter {
       truncated = true;
     });
 
-    await pipeline(stream, fs.createWriteStream(target));
+    try {
+      await pipeline(stream, fs.createWriteStream(temp));
+    } catch (error) {
+      await fsp.rm(temp, { force: true });
+      throw error;
+    }
 
     if (truncated) {
-      await fsp.rm(target, { force: true });
+      await fsp.rm(temp, { force: true });
       throw new Error(
         `413: File '${originalName}' exceeds the maximum allowed size of ${maxFileSize} bytes.`
       );
     }
+
+    const hex = hash.digest('hex');
+    const { storedName, deduplicated } = await this.#commitBlob(temp, hex);
 
     const record = {
       id,
@@ -207,11 +246,48 @@ class UploadService extends EventEmitter {
       storedName,
       mimeType: info.mimeType || 'application/octet-stream',
       size,
-      checksum: `sha256:${hash.digest('hex')}`,
+      checksum: `sha256:${hex}`,
+      deduplicated,
       uploadedAt: new Date().toISOString()
     };
 
     return record;
+  }
+
+  /**
+   * Publish a fully written temp file as a content-addressed blob.
+   *
+   * If a blob with the same hash already exists, the temp copy is discarded and
+   * the existing blob is reused (`deduplicated: true`). Otherwise the temp file
+   * is atomically renamed into place.
+   *
+   * @param {string} tempPath - Path to the temp file (already fully written).
+   * @param {string} hashHex - Lowercase hex sha256 of the temp file's contents.
+   * @returns {Promise<{ storedName: string, deduplicated: boolean }>}
+   */
+  async #commitBlob(tempPath, hashHex) {
+    const storedName = blobRelPath(hashHex);
+    const target = blobPath(hashHex);
+
+    // Reuse an existing blob when we can; this is the deduplication win.
+    try {
+      await fsp.access(target);
+      await fsp.rm(tempPath, { force: true });
+      return { storedName, deduplicated: true };
+    } catch {
+      // Not present yet — try to publish it.
+    }
+
+    try {
+      await fsp.rename(tempPath, target);
+      return { storedName, deduplicated: false };
+    } catch (error) {
+      // A concurrent identical upload may have published the blob first.
+      const exists = await fsp.stat(target).then(() => true).catch(() => false);
+      await fsp.rm(tempPath, { force: true });
+      if (exists) return { storedName, deduplicated: true };
+      throw error;
+    }
   }
 
   async list() {
@@ -244,7 +320,7 @@ class UploadService extends EventEmitter {
 
   async getPath(id) {
     const record = await this.get(id);
-    const filePath = path.join(UPLOAD_DIR, record.storedName);
+    const filePath = resolveStoredPath(record.storedName);
     try {
       await fsp.access(filePath);
     } catch {
@@ -255,21 +331,58 @@ class UploadService extends EventEmitter {
 
   async remove(id) {
     const record = await this.get(id);
-    await fsp.rm(path.join(UPLOAD_DIR, record.storedName), { force: true });
     await fsp.rm(metaPath(id), { force: true });
+    await this.#releaseBlob(record.storedName);
     this.emit('delete', record);
     return record;
   }
 
+  /**
+   * Delete a blob only when no remaining metadata record references it. Because
+   * blobs are shared by content hash, removing one record must not remove the
+   * payload another record still depends on.
+   *
+   * @param {string} storedName - Stored (relative) blob path.
+   * @returns {Promise<boolean>} True when the blob was deleted, false if kept.
+   */
+  async #releaseBlob(storedName) {
+    if (!storedName) return false;
+    // The record's own meta has already been removed by the caller, so any match
+    // here is a different record that still shares the blob.
+    const stillReferenced = (await this.list()).some((r) => r.storedName === storedName);
+    if (stillReferenced) return false;
+    await fsp.rm(resolveStoredPath(storedName), { force: true });
+    return true;
+  }
+
   async getState() {
     const files = await this.list();
+    const totalBytes = files.reduce((sum, file) => sum + (file.size || 0), 0);
+
+    // Physical bytes actually on disk: each distinct blob counted once.
+    const blobs = new Map();
+    for (const file of files) {
+      if (file.storedName && !blobs.has(file.storedName)) blobs.set(file.storedName, file.size || 0);
+    }
+    let storedBytes = 0;
+    for (const storedName of blobs.keys()) {
+      try {
+        storedBytes += (await fsp.stat(resolveStoredPath(storedName))).size;
+      } catch {
+        storedBytes += blobs.get(storedName); // legacy/missing: fall back to logical size
+      }
+    }
+
     return {
       directory: UPLOAD_DIR,
       maxFileSize: this.maxFileSize,
       maxFiles: this.maxFiles,
       chunkSize: CHUNK_SIZE,
       count: files.length,
-      totalBytes: files.reduce((sum, file) => sum + (file.size || 0), 0)
+      totalBytes,
+      uniqueBlobs: blobs.size,
+      storedBytes,
+      deduplicatedBytes: Math.max(totalBytes - storedBytes, 0)
     };
   }
 
@@ -460,15 +573,16 @@ class UploadService extends EventEmitter {
       );
     }
 
+    await this.ensureDir();
+
     return this.#withSessionLock(uploadId, async () => {
       const id = crypto.randomUUID();
-      const extension = path.extname(session.originalName).slice(0, 16);
-      const storedName = `${id}${extension}`;
-      const target = path.join(UPLOAD_DIR, storedName);
+      // Assemble into a temp file; the blob name comes from the content hash.
+      const temp = path.join(BLOB_DIR, `${TEMP_PREFIX}${id}`);
 
       const hash = crypto.createHash('sha256');
       let size = 0;
-      const out = fs.createWriteStream(target);
+      const out = fs.createWriteStream(temp);
 
       try {
         for (let i = 0; i < session.totalChunks; i += 1) {
@@ -484,9 +598,12 @@ class UploadService extends EventEmitter {
           out.end((error) => (error ? reject(error) : resolve()));
         });
       } catch (error) {
-        await fsp.rm(target, { force: true });
+        await fsp.rm(temp, { force: true });
         throw error;
       }
+
+      const hex = hash.digest('hex');
+      const { storedName, deduplicated } = await this.#commitBlob(temp, hex);
 
       const record = {
         id,
@@ -495,7 +612,8 @@ class UploadService extends EventEmitter {
         storedName,
         mimeType: session.mimeType,
         size,
-        checksum: `sha256:${hash.digest('hex')}`,
+        checksum: `sha256:${hex}`,
+        deduplicated,
         uploadedAt: new Date().toISOString(),
         ...session.meta
       };
@@ -548,6 +666,51 @@ class UploadService extends EventEmitter {
         await fsp.rm(sessionDir(session.uploadId), { recursive: true, force: true });
         removed.push(session.uploadId);
       }
+    }
+    // Also reclaim blobs no metadata references (e.g. abandoned temp files).
+    await this.gcBlobs(now);
+    return removed;
+  }
+
+  /**
+   * Delete content-addressed blobs that no metadata record references, plus
+   * orphaned temp files. Blobs modified within `BLOB_GC_GRACE` are skipped so
+   * an upload that has written its blob but not yet its metadata isn't swept.
+   *
+   * @param {number} [now] - Reference time in ms (defaults to `Date.now()`).
+   * @returns {Promise<string[]>} Names of the removed blob files.
+   */
+  async gcBlobs(now = Date.now()) {
+    await this.ensureDir();
+
+    const referenced = new Set();
+    for (const file of await this.list()) {
+      if (file.storedName) referenced.add(file.storedName);
+    }
+
+    let entries = [];
+    try {
+      entries = await fsp.readdir(BLOB_DIR, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+
+    const removed = [];
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const full = path.join(BLOB_DIR, entry.name);
+      if (referenced.has(blobRelPath(entry.name))) continue;
+
+      let stat;
+      try {
+        stat = await fsp.stat(full);
+      } catch {
+        continue; // vanished concurrently
+      }
+      if (now - stat.mtimeMs < BLOB_GC_GRACE) continue;
+
+      await fsp.rm(full, { force: true });
+      removed.push(entry.name);
     }
     return removed;
   }

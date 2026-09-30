@@ -25,7 +25,10 @@ export default new NxpNode({
             maxFileSize: { type: 'integer' },
             maxFiles: { type: 'integer' },
             count: { type: 'integer' },
-            totalBytes: { type: 'integer' }
+            totalBytes: { type: 'integer' },
+            uniqueBlobs: { type: 'integer' },
+            storedBytes: { type: 'integer' },
+            deduplicatedBytes: { type: 'integer' }
           },
           required: ['directory', 'maxFileSize', 'maxFiles', 'count', 'totalBytes']
         },
