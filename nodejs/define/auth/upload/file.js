@@ -1,4 +1,4 @@
-import { NxpNode } from '../../../NxpNode.js';
+import { NxpNode, arrayOf } from '../../../NxpNode.js';
 import { uploadService } from '../../../services/uploadService.js';
 
 export default new NxpNode({
@@ -9,12 +9,9 @@ export default new NxpNode({
   method: 'POST',
   schema: {
     request: {
-      type: 'object',
-      properties: {
-        tags: { type: 'string' },
-        folder: { type: 'string' }
-      },
-      additionalProperties: true
+      file: { type: 'file', description: 'The file to upload (multipart form field "file").' },
+      tags: { type: 'string', description: 'Comma-separated tags metadata.' },
+      folder: { type: 'string', description: 'Destination folder metadata.' }
     },
     response: {
       type: 'object',
@@ -23,24 +20,7 @@ export default new NxpNode({
         message: { type: 'string' },
         uploadedBy: { type: 'string' },
         fields: { type: 'object' },
-        files: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              field: { type: 'string' },
-              originalName: { type: 'string' },
-              storedName: { type: 'string' },
-              mimeType: { type: 'string' },
-              size: { type: 'integer' },
-              checksum: { type: 'string' },
-              deduplicated: { type: 'boolean' },
-              uploadedAt: { type: 'string' }
-            },
-            required: ['id', 'originalName', 'storedName', 'size', 'checksum']
-          }
-        }
+        files: arrayOf({ type: 'file' })
       },
       required: ['success', 'message', 'uploadedBy', 'files'],
       additionalProperties: false

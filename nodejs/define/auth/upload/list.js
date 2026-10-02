@@ -1,4 +1,4 @@
-import { NxpNode } from '../../../NxpNode.js';
+import { NxpNode, arrayOf } from '../../../NxpNode.js';
 import { uploadService } from '../../../services/uploadService.js';
 
 export default new NxpNode({
@@ -18,24 +18,7 @@ export default new NxpNode({
         storedBytes: { type: 'integer' },
         deduplicatedBytes: { type: 'integer' },
         chunkSize: { type: 'integer' },
-        files: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              field: { type: 'string' },
-              originalName: { type: 'string' },
-              storedName: { type: 'string' },
-              mimeType: { type: 'string' },
-              size: { type: 'integer' },
-              checksum: { type: 'string' },
-              deduplicated: { type: 'boolean' },
-              uploadedAt: { type: 'string' }
-            },
-            required: ['id', 'originalName', 'storedName', 'size', 'checksum']
-          }
-        }
+        files: arrayOf({ type: 'file' })
       },
       required: ['count', 'directory', 'maxFileSize', 'maxFiles', 'totalBytes', 'files'],
       additionalProperties: false

@@ -69,9 +69,9 @@ export class NxpNode {
     this.requestFileFields = collectFileFields(request);
     this.responseFileFields = collectFileFields(response);
 
-    this.validator = ajv.compile(normalizeFileTypes(normalizeSchema(request)));
+    this.validator = ajv.compile(normalizeFileTypes(normalizeSchema(structuredClone(request))));
     this.responseValidator = response
-      ? ajv.compile(normalizeFileTypes(normalizeSchema(response)))
+      ? ajv.compile(normalizeFileTypes(normalizeSchema(structuredClone(response))))
       : null;
 
     this.messageSchema = messageSchema;

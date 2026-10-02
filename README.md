@@ -597,6 +597,38 @@ ctx.session.clear();
 
 The cookie uses AES-256-GCM. Set a stable `NXP_SESSION_SECRET` so sessions survive server restarts. For production deployments, use HTTPS and add the appropriate `Secure` cookie behavior, CSRF protection, expiration policy, and session revocation strategy.
 
+## Interactive Web Testing Workbench (`testing/`)
+
+An interactive visual testing workbench is provided in the `testing/` directory. It uses browser-native **IndexedDB** to store test targets and session tokens, inspects live NXP schemas, dynamically builds JSON forms (with full support for nested objects and dynamic arrays), and auto-handles file uploads and downloads.
+
+### Quick Start
+
+1. **Start the NXP API server** (runs on port 3000):
+   ```bash
+   cd nodejs && npm start
+   ```
+
+2. **Start the testing workbench server** (runs on port 4000):
+   ```bash
+   cd testing && npm start
+   ```
+
+3. **Open the workbench**:
+   Navigate to [http://localhost:4000](http://localhost:4000) in your web browser.
+
+### Features
+
+- **IndexedDB Endpoint Storage**: Save and switch between multiple NXP servers (`http://localhost:3000`, staging, remote) with automatic cookie/session persistence across browser reloads.
+- **Dynamic Route Tree**: Automatically fetches `/?nxp` from the selected endpoint, rendering the entire hierarchical API tree with method badges (GET, POST, PUT, DELETE, WS) and guard indicators (🔒).
+- **Dynamic Schema Form Generator**:
+  - Automatically parses JSON Schemas and shorthand specifications (e.g., `{ username: { type: 'string', required: true } }`).
+  - Supports multi dynamic JSON: nested objects, dynamic arrays (`+ Add Item`, removal, re-indexing), primitives, and dropdown enums.
+  - Handles dynamic path parameters (`[id]`, `[token]`, etc.) with required inputs.
+  - Live two-way synchronization between visual form fields and raw JSON editor.
+- **Automatic File Upload**: Drag-and-drop file upload dropzone that packages files and text fields into `multipart/form-data`.
+- **Automatic File Download & Previews**: Detects binary streams and file attachments, providing a one-click download card and inline media previews for images, video, and audio.
+- **Interactive WebSocket Console**: Real-time connection manager, event logs, and message dispatch for testing WebSocket endpoints like `/ws` and `/counter`.
+
 ## Current Scope
 
 This repository is an example core and is not yet a complete production server. Before deploying it publicly, add or configure:

@@ -1,0 +1,2600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NXP Test Explorer — NeuXbane Protocol</title>
+  <style>
+    :root {
+      --bg-main: #0b0f19;
+      --bg-surface: #111827;
+      --bg-card: #1f2937;
+      --bg-input: #151d2c;
+      --border-color: #374151;
+      --border-focus: #38bdf8;
+      --text-main: #f9fafb;
+      --text-muted: #9ca3af;
+      --text-dim: #6b7280;
+      --accent: #38bdf8;
+      --accent-hover: #0284c7;
+      --accent-dim: rgba(56, 189, 248, 0.12);
+      --method-get: #38bdf8;
+      --method-post: #34d399;
+      --method-put: #fbbf24;
+      --method-patch: #f97316;
+      --method-delete: #f87171;
+      --method-ws: #a78bfa;
+      --success: #10b981;
+      --error: #ef4444;
+      --warning: #f59e0b;
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--font-sans);
+      background-color: var(--bg-main);
+      color: var(--text-main);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top Navigation */
+    header {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-color);
+      padding: 10px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-weight: 700;
+      font-size: 16px;
+      color: var(--text-main);
+      letter-spacing: -0.02em;
+    }
+    .brand-badge {
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      color: #fff;
+      font-size: 11px;
+      padding: 3px 7px;
+      border-radius: var(--radius-sm);
+      font-weight: 800;
+      letter-spacing: 0.05em;
+    }
+
+    .target-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      max-width: 720px;
+    }
+
+    .select-wrap {
+      position: relative;
+      flex: 1;
+    }
+    select, input[type="text"], input[type="number"], textarea {
+      width: 100%;
+      background: var(--bg-input);
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      padding: 7px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    select:focus, input:focus, textarea:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      border: 1px solid transparent;
+      transition: background 0.15s, transform 0.05s;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary {
+      background: var(--accent);
+      color: #0b0f19;
+      border-color: var(--accent);
+    }
+    .btn-primary:hover { background: #7dd3fc; }
+    .btn-secondary {
+      background: var(--bg-card);
+      color: var(--text-main);
+      border-color: var(--border-color);
+    }
+    .btn-secondary:hover { background: #374151; }
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.15);
+      color: #fca5a5;
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+    .btn-danger:hover { background: rgba(239, 68, 68, 0.25); }
+    .btn-sm { padding: 4px 8px; font-size: 11px; }
+
+    .header-pills {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .status-pill {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .status-online { background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .status-offline { background: rgba(239, 68, 68, 0.15); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3); }
+    .status-indicator { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+
+    .session-badge {
+      background: rgba(167, 139, 250, 0.15);
+      color: #c4b5fd;
+      border: 1px solid rgba(167, 139, 250, 0.3);
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .session-badge:hover { background: rgba(167, 139, 250, 0.25); }
+
+    /* App Main Layout */
+    .app-container {
+      display: flex;
+      flex: 1;
+      height: calc(100vh - 57px);
+      overflow: hidden;
+    }
+
+    /* Sidebar Tree */
+    .sidebar {
+      width: 320px;
+      min-width: 260px;
+      max-width: 440px;
+      background: var(--bg-surface);
+      border-right: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .sidebar-header {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .sidebar-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .sidebar-search {
+      position: relative;
+    }
+    .sidebar-search input {
+      padding-left: 28px;
+    }
+    .sidebar-search-icon {
+      position: absolute;
+      left: 9px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-dim);
+      font-size: 12px;
+      pointer-events: none;
+    }
+
+    .tree-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 8px;
+    }
+
+    .tree-group-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-dim);
+      padding: 8px 10px 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .tree-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 13px;
+      margin-bottom: 2px;
+      transition: background 0.12s;
+      border: 1px solid transparent;
+      user-select: none;
+    }
+    .tree-item:hover { background: rgba(255, 255, 255, 0.04); }
+    .tree-item.active {
+      background: var(--accent-dim);
+      border-color: rgba(56, 189, 248, 0.35);
+      color: var(--accent);
+    }
+
+    .tree-item-path {
+      flex: 1;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tree-item-guard {
+      font-size: 11px;
+      opacity: 0.8;
+      color: var(--warning);
+      margin-left: auto;
+    }
+
+    .badge-method {
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 5px;
+      border-radius: 4px;
+      letter-spacing: 0.04em;
+      min-width: 44px;
+      text-align: center;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .badge-get { background: rgba(56, 189, 248, 0.18); color: var(--method-get); }
+    .badge-post { background: rgba(52, 211, 153, 0.18); color: var(--method-post); }
+    .badge-put { background: rgba(251, 191, 36, 0.18); color: var(--method-put); }
+    .badge-patch { background: rgba(249, 115, 22, 0.18); color: var(--method-patch); }
+    .badge-delete { background: rgba(248, 113, 113, 0.18); color: var(--method-delete); }
+    .badge-ws { background: rgba(167, 139, 250, 0.18); color: var(--method-ws); }
+    .badge-any { background: rgba(156, 163, 175, 0.18); color: var(--text-muted); }
+
+    /* Main Workspace */
+    .workspace {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg-main);
+    }
+
+    /* Route Header Bar */
+    .route-header {
+      padding: 16px 22px;
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .route-title-line {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .route-path-text {
+      font-family: var(--font-mono);
+      font-size: 17px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    .route-name {
+      font-size: 12px;
+      color: var(--text-dim);
+      font-weight: 500;
+    }
+    .route-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      max-width: 800px;
+      line-height: 1.45;
+    }
+    .guards-tag {
+      margin-top: 6px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: #fde047;
+      background: rgba(234, 179, 8, 0.1);
+      padding: 2px 7px;
+      border-radius: var(--radius-sm);
+      border: 1px solid rgba(234, 179, 8, 0.25);
+    }
+
+    /* Content Panes (Split Request / Response) */
+    .content-panes {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    .pane-request, .pane-response {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .pane-request {
+      border-right: 1px solid var(--border-color);
+    }
+
+    .pane-tabs {
+      background: var(--bg-surface);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      padding: 0 16px;
+      gap: 8px;
+    }
+    .pane-tab {
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .pane-tab:hover { color: var(--text-main); }
+    .pane-tab.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .pane-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 18px 20px;
+    }
+
+    /* Form Fields */
+    .field-group {
+      margin-bottom: 16px;
+    }
+    .field-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      margin-bottom: 5px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .field-label .type-hint {
+      font-size: 10px;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      font-weight: 400;
+    }
+    .field-label .required-star {
+      color: var(--error);
+    }
+    .field-desc {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 3px;
+    }
+
+    /* Dynamic Object / Array Containers */
+    .nested-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-md);
+      padding: 12px;
+      margin-top: 6px;
+    }
+    .nested-header {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .array-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      gap: 10px;
+    }
+    .array-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      background: var(--bg-input);
+      padding: 8px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-color);
+    }
+    .array-row-index {
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-dim);
+      padding-top: 7px;
+      width: 20px;
+      width: 22px;
+      text-align: right;
+    }
+    .array-row-content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .array-row-object {
+      flex-direction: column;
+      background: rgba(30, 41, 59, 0.45);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-sm);
+      padding: 12px;
+      gap: 10px;
+    }
+    .array-row-object-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      width: 100%;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      padding-bottom: 6px;
+    }
+    .array-row-object-title {
+      font-size: 11.5px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 0.03em;
+    }
+    .array-quick-comma {
+      margin-bottom: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px dashed var(--border-color);
+      border-radius: var(--radius-sm);
+      padding: 8px 12px;
+    }
+    .array-quick-comma-label {
+      font-size: 11px;
+      color: var(--text-dim);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .array-quick-comma input {
+      font-size: 12px;
+      font-family: var(--font-mono);
+      padding: 6px 10px;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      color: var(--text-main);
+    }
+
+    /* Drag & Drop File Upload Box */
+    .upload-zone {
+      border: 2px dashed var(--border-color);
+      border-radius: var(--radius-md);
+      background: rgba(31, 41, 55, 0.4);
+      padding: 22px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      margin-top: 8px;
+    }
+    .upload-zone:hover, .upload-zone.dragover {
+      border-color: var(--accent);
+      background: rgba(56, 189, 248, 0.08);
+    }
+    .upload-icon {
+      font-size: 28px;
+      margin-bottom: 8px;
+      display: block;
+    }
+    .upload-prompt {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+    .upload-sub {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 4px;
+    }
+
+    .file-chip-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .file-chip {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      padding: 6px 10px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .file-chip-remove {
+      color: var(--error);
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    /* Action Footer */
+    .pane-footer {
+      padding: 12px 20px;
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    /* Response View */
+    .response-meta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 16px;
+      background: rgba(0, 0, 0, 0.2);
+      border-bottom: 1px solid var(--border-color);
+      font-size: 12px;
+      font-family: var(--font-mono);
+    }
+    .status-badge-lg {
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .status-2xx { background: rgba(52, 211, 153, 0.2); color: #34d399; }
+    .status-4xx { background: rgba(248, 113, 113, 0.2); color: #f87171; }
+    .status-5xx { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+
+    .code-view {
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.5;
+      background: #0d131f;
+      padding: 14px;
+      border-radius: var(--radius-sm);
+      overflow-x: auto;
+      white-space: pre-wrap;
+      color: #e2e8f0;
+      border: 1px solid #1e293b;
+    }
+
+    /* Download Card */
+    .download-card {
+      background: linear-gradient(135deg, rgba(14, 165, 233, 0.1), rgba(56, 189, 248, 0.05));
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      border-radius: var(--radius-md);
+      padding: 16px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .download-info {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+    .download-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+    .download-meta {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+    .download-preview {
+      margin-top: 14px;
+      max-height: 240px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-color);
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      background: #000;
+    }
+    .download-preview img, .download-preview video {
+      max-height: 240px;
+      max-width: 100%;
+      object-fit: contain;
+    }
+
+    /* WebSocket Console */
+    .ws-console {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      gap: 10px;
+    }
+    .ws-log {
+      flex: 1;
+      background: #0d131f;
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-sm);
+      padding: 10px;
+      overflow-y: auto;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .ws-msg {
+      padding: 5px 8px;
+      border-radius: 4px;
+      display: flex;
+      gap: 8px;
+      line-height: 1.4;
+    }
+    .ws-msg.in { background: rgba(56, 189, 248, 0.1); color: #bae6fd; }
+    .ws-msg.out { background: rgba(52, 211, 153, 0.1); color: #a7f3d0; }
+    .ws-msg.system { background: rgba(156, 163, 175, 0.1); color: var(--text-muted); }
+    .ws-controls {
+      display: flex;
+      gap: 8px;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(3px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s;
+    }
+    .modal-overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .modal {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-color);
+      border-radius: var(--radius-lg);
+      width: 480px;
+      max-width: 95vw;
+      padding: 20px 24px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+    }
+    .modal-header {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    /* Scrollbars */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header Navigation -->
+  <header>
+    <div class="brand">
+      <span class="brand-badge">NXP</span>
+      <span>Test Explorer</span>
+    </div>
+
+    <div class="target-controls">
+      <div class="select-wrap">
+        <select id="endpointSelect" title="Select Registered Server Endpoint"></select>
+      </div>
+      <button class="btn btn-secondary btn-sm" id="btnOpenAddModal" title="Add a new server endpoint to IndexedDB">
+        + Add Endpoint
+      </button>
+      <button class="btn btn-danger btn-sm" id="btnDeleteEndpoint" title="Delete current endpoint from IndexedDB">
+        ✕ Remove
+      </button>
+    </div>
+
+    <div class="header-pills">
+      <div class="session-badge" id="sessionPill" title="Click to view or edit session cookies">
+        <span>🍪 Session:</span>
+        <span id="sessionStatusText">No Session</span>
+      </div>
+      <div class="status-pill status-offline" id="serverStatusPill">
+        <span class="status-indicator"></span>
+        <span id="serverStatusText">Checking...</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- App Body Layout -->
+  <div class="app-container">
+
+    <!-- Left Sidebar: Route Tree -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-title">
+          <span>Endpoint Tree</span>
+          <button class="btn btn-secondary btn-sm" id="btnRefreshTree" title="Re-fetch NXP manifest">
+            ↻ Refresh
+          </button>
+        </div>
+        <div class="sidebar-search">
+          <span class="sidebar-search-icon">🔍</span>
+          <input type="text" id="routeSearch" placeholder="Filter routes (/auth, upload...)" autocomplete="off">
+        </div>
+      </div>
+
+      <div class="tree-scroll" id="treeList">
+        <div style="padding: 20px; text-align: center; color: var(--text-dim); font-size: 13px;">
+          Loading endpoint tree...
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Workspace -->
+    <main class="workspace" id="workspace">
+
+      <!-- Route Header Details -->
+      <div class="route-header" id="routeHeader" style="display: none;">
+        <div>
+          <div class="route-title-line">
+            <span class="badge-method badge-get" id="headerMethodBadge">GET</span>
+            <span class="route-path-text" id="headerPath">/</span>
+            <span class="route-name" id="headerName"></span>
+          </div>
+          <div class="route-desc" id="headerDesc"></div>
+          <div id="headerGuards"></div>
+        </div>
+        <div>
+          <button class="btn btn-primary" id="btnExecuteRequest">
+            🚀 Send Request
+          </button>
+        </div>
+      </div>
+
+      <!-- Content Panes (Request Form | Response Viewer) -->
+      <div class="content-panes" id="contentPanes" style="display: none;">
+
+        <!-- Left Pane: Dynamic Schema Form -->
+        <div class="pane-request">
+          <div class="pane-tabs">
+            <div class="pane-tab active" data-tab="form">Schema Form</div>
+            <div class="pane-tab" data-tab="json">Raw JSON</div>
+            <div class="pane-tab" data-tab="manifest">NXP Manifest</div>
+            <div class="pane-tab" id="tabWs" style="display: none;" data-tab="ws">WebSocket Live</div>
+          </div>
+
+          <div class="pane-body" id="tabContentForm">
+            <!-- Dynamic Path Params -->
+            <div id="pathParamsContainer"></div>
+
+            <!-- Dynamic Schema Input Form -->
+            <form id="dynamicForm" onsubmit="event.preventDefault();">
+              <div id="formFieldsContainer"></div>
+            </form>
+
+            <!-- Auto File Upload Dropzone (if upload/files supported) -->
+            <div id="uploadSection" style="display: none; margin-top: 16px;">
+              <div class="field-label">
+                <span>File Attachments (Multipart Form Upload)</span>
+              </div>
+              <div class="upload-zone" id="dropZone">
+                <span class="upload-icon">📁</span>
+                <div class="upload-prompt">Drag & Drop files here or click to browse</div>
+                <div class="upload-sub">Supports single or multi-file uploads (e.g. "file" field)</div>
+                <input type="file" id="fileInput" multiple style="display: none;">
+              </div>
+              <div class="file-chip-list" id="fileChips"></div>
+            </div>
+          </div>
+
+          <!-- Raw JSON Editor Tab -->
+          <div class="pane-body" id="tabContentJson" style="display: none;">
+            <div class="field-label" style="justify-content: space-between;">
+              <span>Request JSON Payload</span>
+              <button class="btn btn-secondary btn-sm" id="btnFormatJson">Format JSON</button>
+            </div>
+            <textarea id="rawJsonTextarea" rows="18" style="font-family: var(--font-mono); font-size: 12px;"></textarea>
+          </div>
+
+          <!-- Raw NXP Manifest Tab -->
+          <div class="pane-body" id="tabContentManifest" style="display: none;">
+            <div class="field-label">
+              <span>Machine-Readable Node Manifest (?nxp)</span>
+            </div>
+            <pre class="code-view" id="manifestView"></pre>
+          </div>
+
+          <!-- WebSocket Live Console Tab -->
+          <div class="pane-body" id="tabContentWs" style="display: none;">
+            <div class="ws-console">
+              <div class="ws-controls">
+                <button class="btn btn-primary btn-sm" id="btnWsConnect">Connect WebSocket</button>
+                <button class="btn btn-danger btn-sm" id="btnWsDisconnect" disabled>Disconnect</button>
+                <span class="status-pill status-offline" id="wsStatusBadge">
+                  <span class="status-indicator"></span>
+                  <span id="wsStatusText">Disconnected</span>
+                </span>
+              </div>
+              <div class="ws-log" id="wsLog">
+                <div class="ws-msg system">[System] WebSocket console ready. Click Connect to initiate live connection.</div>
+              </div>
+              <div style="display: flex; gap: 8px;">
+                <input type="text" id="wsMessageInput" placeholder='{"action":"echo","text":"hello"}' style="font-family: var(--font-mono);">
+                <button class="btn btn-secondary" id="btnWsSend" disabled>Send</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right Pane: Response Viewer -->
+        <div class="pane-response">
+          <div class="pane-tabs">
+            <div class="pane-tab active" data-res-tab="body">Response Body</div>
+            <div class="pane-tab" data-res-tab="headers">Headers</div>
+            <div class="pane-tab" data-res-tab="cookies">Cookies</div>
+          </div>
+
+          <div class="response-meta" id="responseMeta" style="display: none;">
+            <span class="status-badge-lg status-2xx" id="resStatusCode">200 OK</span>
+            <span id="resTime">0 ms</span>
+            <span id="resSize">0 B</span>
+            <button class="btn btn-secondary btn-sm" style="margin-left: auto;" id="btnCopyResponse">📋 Copy</button>
+          </div>
+
+          <div class="pane-body" id="resContentBody">
+            <!-- Auto File Download Card -->
+            <div id="downloadCard" class="download-card" style="display: none;">
+              <div class="download-info">
+                <div class="download-title" id="downloadFilename">downloaded-file</div>
+                <div class="download-meta" id="downloadMetaText">0 KB • application/octet-stream</div>
+              </div>
+              <button class="btn btn-primary" id="btnDownloadFile">
+                ⬇️ Save / Download
+              </button>
+            </div>
+            <!-- Media Preview (Images, Audio, Video) -->
+            <div id="downloadPreview" class="download-preview" style="display: none;"></div>
+
+            <!-- Text / JSON Response -->
+            <pre class="code-view" id="responseBodyView">Send a request to see the live response.</pre>
+          </div>
+
+          <div class="pane-body" id="resContentHeaders" style="display: none;">
+            <pre class="code-view" id="responseHeadersView">No response headers yet.</pre>
+          </div>
+
+          <div class="pane-body" id="resContentCookies" style="display: none;">
+            <pre class="code-view" id="responseCookiesView">No cookies received yet.</pre>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Welcome Placeholder (When no route selected) -->
+      <div id="welcomePlaceholder" style="padding: 60px; text-align: center; color: var(--text-muted); margin: auto;">
+        <div style="font-size: 40px; margin-bottom: 14px;">⚡</div>
+        <h2 style="color: var(--text-main); font-size: 20px; margin-bottom: 8px;">NeuXbane Protocol Test Workbench</h2>
+        <p style="max-width: 480px; margin: 0 auto 20px; font-size: 13.5px; line-height: 1.5;">
+          Select a route from the endpoint tree on the left to inspect its contract, automatically generate forms, upload files, and execute live API requests.
+        </p>
+      </div>
+
+    </main>
+  </div>
+
+  <!-- Add Endpoint Modal -->
+  <div class="modal-overlay" id="addEndpointModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span>Add Registered Server Endpoint</span>
+        <button class="btn btn-secondary btn-sm" id="btnCloseModal">✕</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Friendly Name / Label</label>
+        <input type="text" id="modalEndpointName" placeholder="e.g. Local NXP Core" value="Local NXP Core">
+      </div>
+      <div class="field-group">
+        <label class="field-label">Base URL</label>
+        <input type="text" id="modalEndpointUrl" placeholder="http://localhost:3000" value="http://localhost:3000">
+        <div class="field-desc">Must include scheme and port (e.g. http://localhost:3000)</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" id="btnCancelAdd">Cancel</button>
+        <button class="btn btn-primary" id="btnSaveEndpoint">Save to IndexedDB</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Session Cookie Modal -->
+  <div class="modal-overlay" id="cookieModal">
+    <div class="modal">
+      <div class="modal-header">
+        <span>Session Cookie Management</span>
+        <button class="btn btn-secondary btn-sm" id="btnCloseCookieModal">✕</button>
+      </div>
+      <div class="field-group">
+        <label class="field-label">Stored Cookie Header for Endpoint</label>
+        <textarea id="cookieTextarea" rows="4" placeholder="nxp_session=..."></textarea>
+        <div class="field-desc">Cookies are automatically captured from /login responses and attached to subsequent requests.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-danger btn-sm" id="btnClearCookie">Clear Cookie</button>
+        <button class="btn btn-primary" id="btnSaveCookie">Update Cookie</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Application Script -->
+  <script>
+    /* =========================================================================
+       1. IndexedDB Layer for Registered Endpoints
+       ========================================================================= */
+    const DB_NAME = 'NxpTestingWorkbenchDB';
+    const DB_VERSION = 1;
+    const STORE_ENDPOINTS = 'endpoints';
+
+    function openDatabase() {
+      return new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(STORE_ENDPOINTS)) {
+            const store = db.createObjectStore(STORE_ENDPOINTS, { keyPath: 'id' });
+            store.createIndex('url', 'url', { unique: false });
+          }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function dbGetAllEndpoints() {
+      const db = await openDatabase();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_ENDPOINTS, 'readonly');
+        const store = tx.objectStore(STORE_ENDPOINTS);
+        const req = store.getAll();
+        req.onsuccess = () => resolve(req.result || []);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function dbSaveEndpoint(endpoint) {
+      const db = await openDatabase();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_ENDPOINTS, 'readwrite');
+        const store = tx.objectStore(STORE_ENDPOINTS);
+        const req = store.put(endpoint);
+        req.onsuccess = () => resolve(endpoint);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    async function dbDeleteEndpoint(id) {
+      const db = await openDatabase();
+      return new Promise((resolve, reject) => {
+        const tx = db.transaction(STORE_ENDPOINTS, 'readwrite');
+        const store = tx.objectStore(STORE_ENDPOINTS);
+        const req = store.delete(id);
+        req.onsuccess = () => resolve(true);
+        req.onerror = () => reject(req.error);
+      });
+    }
+
+    /* =========================================================================
+       2. Application State & Elements
+       ========================================================================= */
+    const state = {
+      endpoints: [],
+      currentEndpoint: null,
+      routes: [], // Flattened routes list
+      selectedRoute: null,
+      attachedFiles: [],
+      currentWs: null,
+      lastDownloadBlob: null,
+      lastDownloadFilename: ''
+    };
+
+    // DOM Elements
+    const endpointSelect = document.getElementById('endpointSelect');
+    const treeList = document.getElementById('treeList');
+    const routeSearch = document.getElementById('routeSearch');
+    const serverStatusPill = document.getElementById('serverStatusPill');
+    const serverStatusText = document.getElementById('serverStatusText');
+    const sessionPill = document.getElementById('sessionPill');
+    const sessionStatusText = document.getElementById('sessionStatusText');
+
+    const routeHeader = document.getElementById('routeHeader');
+    const contentPanes = document.getElementById('contentPanes');
+    const welcomePlaceholder = document.getElementById('welcomePlaceholder');
+
+    const headerMethodBadge = document.getElementById('headerMethodBadge');
+    const headerPath = document.getElementById('headerPath');
+    const headerName = document.getElementById('headerName');
+    const headerDesc = document.getElementById('headerDesc');
+    const headerGuards = document.getElementById('headerGuards');
+
+    const formFieldsContainer = document.getElementById('formFieldsContainer');
+    const pathParamsContainer = document.getElementById('pathParamsContainer');
+    const rawJsonTextarea = document.getElementById('rawJsonTextarea');
+    const manifestView = document.getElementById('manifestView');
+    const uploadSection = document.getElementById('uploadSection');
+    const dropZone = document.getElementById('dropZone');
+    const fileInput = document.getElementById('fileInput');
+    const fileChips = document.getElementById('fileChips');
+
+    const btnExecuteRequest = document.getElementById('btnExecuteRequest');
+    const responseMeta = document.getElementById('responseMeta');
+    const resStatusCode = document.getElementById('resStatusCode');
+    const resTime = document.getElementById('resTime');
+    const resSize = document.getElementById('resSize');
+    const responseBodyView = document.getElementById('responseBodyView');
+    const responseHeadersView = document.getElementById('responseHeadersView');
+    const responseCookiesView = document.getElementById('responseCookiesView');
+
+    const downloadCard = document.getElementById('downloadCard');
+    const downloadFilename = document.getElementById('downloadFilename');
+    const downloadMetaText = document.getElementById('downloadMetaText');
+    const btnDownloadFile = document.getElementById('btnDownloadFile');
+    const downloadPreview = document.getElementById('downloadPreview');
+
+    // Modals
+    const addEndpointModal = document.getElementById('addEndpointModal');
+    const cookieModal = document.getElementById('cookieModal');
+    const cookieTextarea = document.getElementById('cookieTextarea');
+
+    /* =========================================================================
+       3. Initialization & Endpoint Management
+       ========================================================================= */
+    async function init() {
+      try {
+        state.endpoints = await dbGetAllEndpoints();
+
+        // If no endpoints registered yet, provide default
+        if (state.endpoints.length === 0) {
+          const defaultEp = {
+            id: 'ep_' + Date.now(),
+            name: 'Local NXP Server',
+            url: 'http://localhost:3000',
+            cookies: '',
+            addedAt: new Date().toISOString()
+          };
+          await dbSaveEndpoint(defaultEp);
+          state.endpoints.push(defaultEp);
+        }
+
+        renderEndpointSelect();
+        selectEndpoint(state.endpoints[0].id);
+      } catch (err) {
+        console.error('Initialization error:', err);
+      }
+    }
+
+    function renderEndpointSelect() {
+      endpointSelect.innerHTML = '';
+      for (const ep of state.endpoints) {
+        const opt = document.createElement('option');
+        opt.value = ep.id;
+        opt.textContent = `${ep.name} (${ep.url})`;
+        endpointSelect.appendChild(opt);
+      }
+    }
+
+    async function selectEndpoint(id) {
+      const ep = state.endpoints.find(e => e.id === id);
+      if (!ep) return;
+      state.currentEndpoint = ep;
+      endpointSelect.value = id;
+      updateSessionBadge();
+      await refreshEndpointTree();
+    }
+
+    function updateSessionBadge() {
+      if (!state.currentEndpoint || !state.currentEndpoint.cookies) {
+        sessionStatusText.textContent = 'No Cookie';
+        return;
+      }
+      const match = state.currentEndpoint.cookies.match(/nxp_session=([^;]+)/);
+      sessionStatusText.textContent = match ? 'Active Session' : 'Has Cookies';
+    }
+
+    /* =========================================================================
+       4. Fetch NXP Manifest & Build Route Tree
+       ========================================================================= */
+    function getProxyUrl(targetUrl) {
+      return `/api/proxy?url=${encodeURIComponent(targetUrl)}`;
+    }
+
+    async function refreshEndpointTree() {
+      if (!state.currentEndpoint) return;
+      setServerStatus('Checking...', 'offline');
+      treeList.innerHTML = `<div style="padding: 20px; text-align: center; color: var(--text-dim); font-size: 13px;">Fetching NXP manifest from ${state.currentEndpoint.url}...</div>`;
+
+      try {
+        const rootNxpUrl = `${state.currentEndpoint.url.replace(/\/+$/, '')}/?nxp`;
+        const res = await fetch(getProxyUrl(rootNxpUrl), {
+          headers: state.currentEndpoint.cookies ? { 'x-proxy-cookie': state.currentEndpoint.cookies } : {}
+        });
+
+        if (!res.ok) {
+          throw new Error(`Server returned HTTP ${res.status}`);
+        }
+
+        const rootManifest = await res.json();
+        setServerStatus('Connected', 'online');
+
+        // Flatten hierarchical manifest into route list
+        state.routes = [];
+        flattenManifest(rootManifest, state.routes);
+        renderRouteTree();
+      } catch (err) {
+        setServerStatus('Offline', 'offline');
+        treeList.innerHTML = `
+          <div style="padding: 20px; text-align: center; color: var(--error); font-size: 13px;">
+            Failed to connect to ${state.currentEndpoint.url}<br>
+            <span style="font-size: 11px; color: var(--text-dim);">${err.message}</span>
+            <div style="margin-top: 12px;">
+              <button class="btn btn-secondary btn-sm" onclick="refreshEndpointTree()">↻ Retry</button>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    function flattenManifest(node, outList) {
+      outList.push(node);
+      if (node.children) {
+        for (const childKey of Object.keys(node.children)) {
+          flattenManifest(node.children[childKey], outList);
+        }
+      }
+    }
+
+    function setServerStatus(text, statusClass) {
+      serverStatusText.textContent = text;
+      serverStatusPill.className = `status-pill status-${statusClass}`;
+    }
+
+    function renderRouteTree() {
+      const filter = (routeSearch.value || '').trim().toLowerCase();
+      treeList.innerHTML = '';
+
+      const filtered = state.routes.filter(r => {
+        if (!filter) return true;
+        return (r.path || '').toLowerCase().includes(filter) ||
+               (r.name || '').toLowerCase().includes(filter) ||
+               (r.method || '').toLowerCase().includes(filter);
+      });
+
+      if (filtered.length === 0) {
+        treeList.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-dim); font-size: 12px;">No matching routes found</div>';
+        return;
+      }
+
+      // Group routes by top-level section
+      const groups = {};
+      for (const route of filtered) {
+        const segs = (route.path || '/').split('/').filter(Boolean);
+        const group = segs.length > 0 ? '/' + segs[0] : '/';
+        if (!groups[group]) groups[group] = [];
+        groups[group].push(route);
+      }
+
+      for (const [groupName, groupRoutes] of Object.entries(groups)) {
+        const groupHeading = document.createElement('div');
+        groupHeading.className = 'tree-group-title';
+        groupHeading.innerHTML = `<span>${groupName}</span><span>${groupRoutes.length}</span>`;
+        treeList.appendChild(groupHeading);
+
+        for (const route of groupRoutes) {
+          const item = document.createElement('div');
+          item.className = 'tree-item' + (state.selectedRoute === route ? ' active' : '');
+          const m = (route.method || 'GET').toLowerCase();
+          const badgeClass = route.isWebSocket ? 'badge-ws' : `badge-${m}`;
+          const badgeText = route.isWebSocket ? 'WS' : route.method || 'GET';
+
+          const hasGuard = route.inheritedGuards && route.inheritedGuards.length > 0;
+
+          item.innerHTML = `
+            <span class="badge-method ${badgeClass}">${badgeText}</span>
+            <span class="tree-item-path" title="${route.path}">${route.path}</span>
+            ${hasGuard ? '<span class="tree-item-guard" title="Guarded by ' + route.inheritedGuards.join(', ') + '">🔒</span>' : ''}
+          `;
+
+          item.onclick = () => selectRoute(route);
+          treeList.appendChild(item);
+        }
+      }
+    }
+
+    /* =========================================================================
+       5. Route Selection & Dynamic Schema Form Generation
+       ========================================================================= */
+    function selectRoute(route) {
+      state.selectedRoute = route;
+      renderRouteTree();
+
+      welcomePlaceholder.style.display = 'none';
+      routeHeader.style.display = 'flex';
+      contentPanes.style.display = 'flex';
+
+      // Update Header
+      const m = (route.method || 'GET').toLowerCase();
+      headerMethodBadge.className = `badge-method ${route.isWebSocket ? 'badge-ws' : 'badge-' + m}`;
+      headerMethodBadge.textContent = route.isWebSocket ? 'WS' : route.method || 'GET';
+      headerPath.textContent = route.path;
+      headerName.textContent = route.name ? `[${route.name}]` : '';
+      headerDesc.textContent = route.description || 'No description provided for this endpoint.';
+
+      // Scope guards tag
+      if (route.inheritedGuards && route.inheritedGuards.length > 0) {
+        headerGuards.innerHTML = `<span class="guards-tag">🔒 Scope Guards: ${route.inheritedGuards.join(', ')}</span>`;
+      } else {
+        headerGuards.innerHTML = '';
+      }
+
+      // WebSocket tab toggle
+      const tabWs = document.getElementById('tabWs');
+      tabWs.style.display = route.isWebSocket ? 'block' : 'none';
+
+      // Reset response viewer
+      responseMeta.style.display = 'none';
+      responseBodyView.textContent = 'Send a request to see the live response.';
+      responseHeadersView.textContent = 'No response headers yet.';
+      downloadCard.style.display = 'none';
+      downloadPreview.style.display = 'none';
+      state.attachedFiles = [];
+      renderFileChips();
+
+      // Show NXP Manifest
+      manifestView.textContent = JSON.stringify(route, null, 2);
+
+      // Build Dynamic Form
+      buildDynamicForm(route);
+    }
+
+    function buildDynamicForm(route) {
+      formFieldsContainer.innerHTML = '';
+      pathParamsContainer.innerHTML = '';
+
+      // 1. Detect Dynamic Path Parameters: [id], [token], [index]
+      const dynamicSegments = (route.path || '').match(/\[([a-zA-Z0-9_-]+)\]/g);
+      if (dynamicSegments && dynamicSegments.length > 0) {
+        const pathCard = document.createElement('div');
+        pathCard.className = 'nested-card';
+        pathCard.style.marginBottom = '14px';
+        pathCard.innerHTML = `<div class="nested-header"><span>Dynamic Path Parameters</span></div>`;
+
+        for (const seg of dynamicSegments) {
+          const paramKey = seg.slice(1, -1);
+          const fg = document.createElement('div');
+          fg.className = 'field-group';
+          fg.innerHTML = `
+            <label class="field-label">${paramKey} <span class="required-star">*</span> <span class="type-hint">path param</span></label>
+            <input type="text" data-path-param="${paramKey}" placeholder="e.g. 101, file-id..." required>
+          `;
+          pathCard.appendChild(fg);
+        }
+        pathParamsContainer.appendChild(pathCard);
+      }
+
+      // 2. Normalize and Build Form Fields from Schema
+      const schema = resolveRequestSchema(route.schema);
+      const initialJson = {};
+
+      if (schema && schema.properties && Object.keys(schema.properties).length > 0) {
+        for (const [key, rule] of Object.entries(schema.properties)) {
+          const isRequired = Array.isArray(schema.required) && schema.required.includes(key);
+          const fieldEl = renderSchemaField(key, rule, isRequired, initialJson);
+          formFieldsContainer.appendChild(fieldEl);
+        }
+      } else if (schema && schema.type === 'array') {
+        const fieldEl = renderSchemaField('items', schema, true, initialJson);
+        formFieldsContainer.appendChild(fieldEl);
+      } else {
+        const emptyMsg = document.createElement('div');
+        emptyMsg.style.cssText = 'color: var(--text-dim); font-size: 13px; padding: 10px 0;';
+        emptyMsg.textContent = 'This endpoint does not require any parameters or request body.';
+        formFieldsContainer.appendChild(emptyMsg);
+      }
+
+      // 3. File Upload Dropzone Toggle
+      const isUpload = route.path.includes('upload') ||
+                       (route.description || '').toLowerCase().includes('multipart') ||
+                       (route.description || '').toLowerCase().includes('file') ||
+                       (schema && schema.properties && Object.values(schema.properties).some(p => p.type === 'file' || p.nxpFile));
+      uploadSection.style.display = isUpload ? 'block' : 'none';
+
+      // 4. Update Raw JSON Textarea
+      rawJsonTextarea.value = JSON.stringify(initialJson, null, 2);
+    }
+
+    function resolveRequestSchema(schema) {
+      if (!schema || typeof schema !== 'object') return null;
+
+      // 1. Unwrap `request` property if present (e.g. { request: { ... }, response: { ... } })
+      let target = schema;
+      if (schema.request && typeof schema.request === 'object') {
+        target = schema.request;
+      }
+
+      if (!target || typeof target !== 'object' || Array.isArray(target)) return null;
+
+      // 2. Standard JSON Schema with `properties`
+      if (target.properties && typeof target.properties === 'object') {
+        return {
+          type: 'object',
+          properties: target.properties,
+          required: Array.isArray(target.required) ? target.required : []
+        };
+      }
+
+      // 3. Top-level array schema
+      if (target.type === 'array') {
+        return target;
+      }
+
+      // 4. Shorthand field map (e.g. { username: { type: 'string', required: true }, ... })
+      const properties = {};
+      const required = Array.isArray(target.required) ? [...target.required] : [];
+      let fieldCount = 0;
+
+      for (const [key, rule] of Object.entries(target)) {
+        if (['type', 'required', 'properties', 'additionalProperties', 'description', '$schema', '$defs', 'definitions'].includes(key)) {
+          continue;
+        }
+        if (rule && typeof rule === 'object' && !Array.isArray(rule)) {
+          fieldCount++;
+          const isReq = rule.required === true;
+          const { required: _, ...cleanRule } = rule;
+          properties[key] = cleanRule;
+          if (isReq && !required.includes(key)) {
+            required.push(key);
+          }
+        }
+      }
+
+      if (fieldCount > 0) {
+        return {
+          type: 'object',
+          properties,
+          required
+        };
+      }
+
+      return null;
+    }
+
+    /* =========================================================================
+       6. Multi Dynamic JSON Field Renderer (Prims, Enums, Objects, Arrays)
+       ========================================================================= */
+    function renderSchemaField(key, rule, isRequired, jsonAccumulator, pathPrefix = '') {
+      const fieldId = pathPrefix ? `${pathPrefix}.${key}` : key;
+      const fg = document.createElement('div');
+      fg.className = 'field-group';
+
+      const type = rule.type || (rule.enum ? 'enum' : (rule.oneOf ? 'oneOf' : 'any'));
+      const defaultValue = rule.default !== undefined ? rule.default : '';
+
+      // Initialize default in JSON accumulator
+      if (defaultValue !== '') {
+        jsonAccumulator[key] = defaultValue;
+      } else if (rule.enum && Array.isArray(rule.enum) && rule.enum.length > 0) {
+        jsonAccumulator[key] = rule.enum[0];
+      } else if (type === 'string' || type === 'any') {
+        jsonAccumulator[key] = '';
+      } else if (type === 'boolean') {
+        jsonAccumulator[key] = false;
+      } else if (type === 'integer' || type === 'number') {
+        jsonAccumulator[key] = rule.minimum !== undefined ? rule.minimum : 0;
+      }
+
+      const label = document.createElement('label');
+      label.className = 'field-label';
+      label.innerHTML = `
+        <span>${key}</span>
+        ${isRequired ? '<span class="required-star">*</span>' : ''}
+        <span class="type-hint">${type}</span>
+      `;
+      fg.appendChild(label);
+
+      // A. Enum Selector
+      if (rule.enum && Array.isArray(rule.enum)) {
+        const sel = document.createElement('select');
+        sel.dataset.fieldPath = fieldId;
+        for (const optVal of rule.enum) {
+          const opt = document.createElement('option');
+          opt.value = optVal;
+          opt.textContent = optVal;
+          if (optVal === defaultValue) opt.selected = true;
+          sel.appendChild(opt);
+        }
+        jsonAccumulator[key] = sel.value;
+        sel.onchange = () => syncFormToJson();
+        fg.appendChild(sel);
+      }
+      // B. Nested Object
+      else if (type === 'object') {
+        const objCard = document.createElement('div');
+        objCard.className = 'nested-card';
+        const objAccumulator = {};
+        jsonAccumulator[key] = objAccumulator;
+
+        if (rule.properties) {
+          for (const [subKey, subRule] of Object.entries(rule.properties)) {
+            const subRequired = Array.isArray(rule.required) && rule.required.includes(subKey);
+            const subField = renderSchemaField(subKey, subRule, subRequired, objAccumulator, fieldId);
+            objCard.appendChild(subField);
+          }
+        } else {
+          // Unbounded object: allow raw JSON
+          const rawObj = document.createElement('textarea');
+          rawObj.dataset.fieldPath = fieldId;
+          rawObj.rows = 3;
+          rawObj.value = '{}';
+          rawObj.oninput = () => syncFormToJson();
+          objCard.appendChild(rawObj);
+        }
+        fg.appendChild(objCard);
+      }
+      // C. Dynamic Array Support
+      // C. Dynamic Array Support (Primitives & Nested Objects)
+      else if (type === 'array') {
+        const arrayCard = document.createElement('div');
+        arrayCard.className = 'nested-card';
+
+        const itemRule = rule.items || { type: 'string' };
+        const isObjItem = isObjectSchema(itemRule);
+        const isStructuredObj = Boolean(itemRule.properties && typeof itemRule.properties === 'object');
+        const isFileItem = itemRule.type === 'file' || Boolean(itemRule.nxpFile);
+        const itemTypeLabel = isFileItem ? 'file[]' : (isObjItem ? (isStructuredObj ? 'object[]' : 'JSON[]') : `${itemRule.type || 'string'}[]`);
+
+        // Update accumulator default
+        const arrAccumulator = Array.isArray(defaultValue) ? [...defaultValue] : [];
+        jsonAccumulator[key] = arrAccumulator;
+
+        const header = document.createElement('div');
+        header.className = 'nested-header';
+        header.innerHTML = `<span>Array Items</span>`;
+        header.innerHTML = `
+          <span>Array Items <span class="type-hint" style="text-transform: none; margin-left: 6px;">${itemTypeLabel}</span></span>
+        `;
+
+        const btnAdd = document.createElement('button');
+        btnAdd.type = 'button';
+        btnAdd.className = 'btn btn-secondary btn-sm';
+        btnAdd.textContent = '+ Add Item';
+        btnAdd.textContent = isObjItem ? '+ Add Object Item' : (isFileItem ? '+ Add File' : '+ Add Item');
+        header.appendChild(btnAdd);
+        arrayCard.appendChild(header);
+
+        if (isObjItem) {
+          const desc = document.createElement('div');
+          desc.className = 'field-desc';
+          desc.style.marginBottom = '8px';
+          desc.textContent = isStructuredObj
+            ? 'Structured nested objects: add items to configure individual properties for each object.'
+            : 'Unstructured objects: enter valid JSON payload for each object item.';
+          arrayCard.appendChild(desc);
+        }
+
+        // For primitive arrays (strings, numbers): provide a quick comma-separated entry helper!
+        let quickCommaInput = null;
+        if (!isObjItem && !isFileItem) {
+          const quickWrap = document.createElement('div');
+          quickWrap.className = 'array-quick-comma';
+          quickWrap.innerHTML = `
+            <div class="array-quick-comma-label">
+              <span>Quick Entry (comma-separated):</span>
+              <span style="font-size: 10px; color: var(--text-dim);">e.g. tag1, tag2, tag3</span>
+            </div>
+          `;
+          quickCommaInput = document.createElement('input');
+          quickCommaInput.type = 'text';
+          quickCommaInput.dataset.quickCommaFor = fieldId;
+          quickCommaInput.placeholder = 'Type comma-separated values to auto-populate array items...';
+          quickWrap.appendChild(quickCommaInput);
+          arrayCard.appendChild(quickWrap);
+        }
+
+        const listContainer = document.createElement('div');
+        listContainer.className = 'array-list';
+        listContainer.dataset.arrayPath = fieldId;
+        listContainer.dataset.arrayType = isStructuredObj ? 'structured-object' : (isObjItem ? 'unstructured-object' : (isFileItem ? 'file' : 'primitive'));
+        arrayCard.appendChild(listContainer);
+
+        const itemRule = rule.items || { type: 'string' };
+        function updateQuickComma() {
+          if (!quickCommaInput) return;
+          const vals = [];
+          Array.from(listContainer.children).forEach(row => {
+            const inp = row.querySelector('[data-field-path]');
+            if (inp && inp.value !== '') vals.push(inp.value);
+          });
+          quickCommaInput.value = vals.join(', ');
+        }
+
+        function addArrayItem(val = '') {
+        function addArrayItem(val = undefined) {
+          const curIndex = listContainer.children.length;
+          const row = document.createElement('div');
+          row.className = 'array-row';
+
+          const idx = document.createElement('div');
+          idx.className = 'array-row-index';
+          idx.textContent = listContainer.children.length + 1;
+          row.appendChild(idx);
+          if (isStructuredObj) {
+            // Structured nested object
+            row.className = 'array-row array-row-object';
+            row.dataset.rowIndex = curIndex;
+
+          const content = document.createElement('div');
+          content.className = 'array-row-content';
+            const rowHeader = document.createElement('div');
+            rowHeader.className = 'array-row-object-header';
+            rowHeader.innerHTML = `<span class="array-row-object-title">Item #${curIndex + 1}</span>`;
+
+          if (itemRule.type === 'object' && itemRule.properties) {
+            // Nested object item
+            const itemObj = {};
+            const btnDel = document.createElement('button');
+            btnDel.type = 'button';
+            btnDel.className = 'btn btn-danger btn-sm';
+            btnDel.innerHTML = '✕ Remove';
+            btnDel.onclick = () => {
+              row.remove();
+              updateArrayIndices(listContainer, fieldId);
+              syncFormToJson();
+            };
+            rowHeader.appendChild(btnDel);
+            row.appendChild(rowHeader);
+
+            const rowContent = document.createElement('div');
+            rowContent.className = 'array-row-content';
+
+            const itemInitial = typeof val === 'object' && val !== null ? val : {};
+            const itemObjAccumulator = {};
+
+            for (const [pk, pr] of Object.entries(itemRule.properties)) {
+              content.appendChild(renderSchemaField(pk, pr, false, itemObj, `${fieldId}[${listContainer.children.length}]`));
+              const isPropRequired = Array.isArray(itemRule.required) && itemRule.required.includes(pk);
+              const propRule = { ...pr };
+              if (itemInitial[pk] !== undefined) {
+                propRule.default = itemInitial[pk];
+              }
+              const renderedField = renderSchemaField(pk, propRule, isPropRequired, itemObjAccumulator, `${fieldId}[${curIndex}]`);
+              rowContent.appendChild(renderedField);
+            }
+
+            row.appendChild(rowContent);
+          } else if (isObjItem) {
+            // Unstructured object: JSON editor
+            row.className = 'array-row array-row-object';
+            row.dataset.rowIndex = curIndex;
+
+            const rowHeader = document.createElement('div');
+            rowHeader.className = 'array-row-object-header';
+            rowHeader.innerHTML = `<span class="array-row-object-title">Item #${curIndex + 1} (Object)</span>`;
+
+            const btnDel = document.createElement('button');
+            btnDel.type = 'button';
+            btnDel.className = 'btn btn-danger btn-sm';
+            btnDel.innerHTML = '✕ Remove';
+            btnDel.onclick = () => {
+              row.remove();
+              updateArrayIndices(listContainer, fieldId);
+              syncFormToJson();
+            };
+            rowHeader.appendChild(btnDel);
+            row.appendChild(rowHeader);
+
+            const rowContent = document.createElement('div');
+            rowContent.className = 'array-row-content';
+
+            const txtArea = document.createElement('textarea');
+            txtArea.className = 'code-view';
+            txtArea.dataset.fieldPath = `${fieldId}[${curIndex}]`;
+            txtArea.rows = 3;
+            txtArea.style.width = '100%';
+            txtArea.style.resize = 'vertical';
+            txtArea.value = typeof val === 'object' && val !== null ? JSON.stringify(val, null, 2) : (val || '{}');
+            txtArea.oninput = () => syncFormToJson();
+            rowContent.appendChild(txtArea);
+
+            row.appendChild(rowContent);
+          } else if (isFileItem) {
+            // File item
+            row.className = 'array-row';
+            row.dataset.rowIndex = curIndex;
+
+            const idx = document.createElement('div');
+            idx.className = 'array-row-index';
+            idx.textContent = curIndex + 1;
+            row.appendChild(idx);
+
+            const rowContent = document.createElement('div');
+            rowContent.className = 'array-row-content';
+
+            const fileWrap = document.createElement('div');
+            fileWrap.style.cssText = 'display: flex; gap: 8px; align-items: center; width: 100%;';
+
+            const txt = document.createElement('input');
+            txt.type = 'text';
+            txt.dataset.fieldPath = `${fieldId}[${curIndex}]`;
+            txt.value = typeof val === 'string' ? val : '';
+            txt.placeholder = 'Browse file or enter token/id...';
+            txt.style.flex = '1';
+            txt.oninput = () => syncFormToJson();
+
+            const btnChoose = document.createElement('button');
+            btnChoose.type = 'button';
+            btnChoose.className = 'btn btn-secondary btn-sm';
+            btnChoose.textContent = '📁 Browse...';
+            btnChoose.onclick = () => fileInput.click();
+
+            fileWrap.appendChild(txt);
+            fileWrap.appendChild(btnChoose);
+            rowContent.appendChild(fileWrap);
+            row.appendChild(rowContent);
+
+            const btnDel = document.createElement('button');
+            btnDel.type = 'button';
+            btnDel.className = 'btn btn-danger btn-sm';
+            btnDel.innerHTML = '✕';
+            btnDel.onclick = () => {
+              row.remove();
+              updateArrayIndices(listContainer, fieldId);
+              syncFormToJson();
+            };
+            row.appendChild(btnDel);
+          } else {
+            // Primitive or flexible item
+            // Primitive item (string, number, boolean)
+            row.className = 'array-row';
+            row.dataset.rowIndex = curIndex;
+
+            const idx = document.createElement('div');
+            idx.className = 'array-row-index';
+            idx.textContent = curIndex + 1;
+            row.appendChild(idx);
+
+            const rowContent = document.createElement('div');
+            rowContent.className = 'array-row-content';
+
+            const inp = document.createElement('input');
+            inp.type = itemRule.type === 'integer' || itemRule.type === 'number' ? 'number' : 'text';
+            inp.value = typeof val === 'object' ? JSON.stringify(val) : val;
+            const isNum = itemRule.type === 'integer' || itemRule.type === 'number';
+            inp.type = isNum ? 'number' : 'text';
+            inp.dataset.fieldPath = `${fieldId}[${curIndex}]`;
+            inp.value = val !== undefined ? val : '';
+            inp.placeholder = `Item value (${itemRule.type || 'text'})`;
+            inp.oninput = () => syncFormToJson();
+            content.appendChild(inp);
+            inp.oninput = () => {
+              updateQuickComma();
+              syncFormToJson();
+            };
+            rowContent.appendChild(inp);
+            row.appendChild(rowContent);
+
+            const btnDel = document.createElement('button');
+            btnDel.type = 'button';
+            btnDel.className = 'btn btn-danger btn-sm';
+            btnDel.innerHTML = '✕';
+            btnDel.onclick = () => {
+              row.remove();
+              updateArrayIndices(listContainer, fieldId);
+              updateQuickComma();
+              syncFormToJson();
+            };
+            row.appendChild(btnDel);
+          }
+          row.appendChild(content);
+
+          const btnDel = document.createElement('button');
+          btnDel.className = 'btn btn-danger btn-sm';
+          btnDel.innerHTML = '✕';
+          btnDel.onclick = () => {
+            row.remove();
+            updateArrayIndices(listContainer);
+            syncFormToJson();
+          };
+          row.appendChild(btnDel);
+
+          listContainer.appendChild(row);
+          updateArrayIndices(listContainer, fieldId);
+          if (!isObjItem && !isFileItem) updateQuickComma();
+          syncFormToJson();
+        }
+
+        btnAdd.onclick = () => addArrayItem('');
+        btnAdd.onclick = () => addArrayItem();
+
+        // Populate initial defaults if array had default items
+        // Hook up Quick Comma Input for primitive arrays
+        if (quickCommaInput) {
+          quickCommaInput.oninput = () => {
+            const raw = quickCommaInput.value;
+            const items = raw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+            listContainer.innerHTML = '';
+            for (const itm of items) {
+              const isNum = itemRule.type === 'integer' || itemRule.type === 'number';
+              const parsedItm = isNum ? Number(itm) : itm;
+              addArrayItem(parsedItm);
+            }
+            if (items.length === 0) {
+              syncFormToJson();
+            }
+          };
+        }
+
+        // Method on listContainer so syncJsonToInputs can sync array size
+        listContainer._syncWithArray = function(arrVal) {
+          if (!Array.isArray(arrVal)) return;
+          listContainer.innerHTML = '';
+          for (const itemVal of arrVal) {
+            addArrayItem(itemVal);
+          }
+          if (quickCommaInput) {
+            quickCommaInput.value = arrVal.filter(v => typeof v !== 'object' && v !== null && v !== undefined).join(', ');
+          }
+        };
+
+        // Populate initial defaults
+        if (Array.isArray(defaultValue) && defaultValue.length > 0) {
+          for (const itemVal of defaultValue) addArrayItem(itemVal);
+        }
+
+        fg.appendChild(arrayCard);
+      }
+      // D. Boolean Toggle
+      else if (type === 'boolean') {
+        const checkWrap = document.createElement('label');
+        checkWrap.style.display = 'flex';
+        checkWrap.style.alignItems = 'center';
+        checkWrap.style.gap = '8px';
+        checkWrap.style.cursor = 'pointer';
+
+        const chk = document.createElement('input');
+        chk.type = 'checkbox';
+        chk.dataset.fieldPath = fieldId;
+        chk.checked = Boolean(defaultValue);
+        chk.onchange = () => syncFormToJson();
+
+        checkWrap.appendChild(chk);
+        checkWrap.appendChild(document.createTextNode(' Enabled'));
+        fg.appendChild(checkWrap);
+      }
+      // E. Number / Integer
+      else if (type === 'integer' || type === 'number') {
+        const num = document.createElement('input');
+        num.type = 'number';
+        num.dataset.fieldPath = fieldId;
+        if (rule.minimum !== undefined) num.min = rule.minimum;
+        if (rule.maximum !== undefined) num.max = rule.maximum;
+        num.value = defaultValue;
+        num.oninput = () => syncFormToJson();
+        fg.appendChild(num);
+      }
+      // F. File Field Input
+      else if (type === 'file' || rule.nxpFile) {
+        const fileWrap = document.createElement('div');
+        fileWrap.style.cssText = 'display: flex; gap: 8px; align-items: center;';
+
+        const txt = document.createElement('input');
+        txt.type = 'text';
+        txt.dataset.fieldPath = fieldId;
+        txt.value = defaultValue;
+        txt.placeholder = 'Select file with Browse button or enter token / file id...';
+        txt.oninput = () => syncFormToJson();
+        txt.style.flex = '1';
+
+        const btnChoose = document.createElement('button');
+        btnChoose.type = 'button';
+        btnChoose.className = 'btn btn-secondary btn-sm';
+        btnChoose.textContent = '📁 Browse...';
+        btnChoose.onclick = () => fileInput.click();
+
+        fileWrap.appendChild(txt);
+        fileWrap.appendChild(btnChoose);
+        fg.appendChild(fileWrap);
+      }
+      // G. String / Text Input
+      else {
+        const txt = document.createElement('input');
+        txt.type = 'text';
+        txt.dataset.fieldPath = fieldId;
+        txt.value = defaultValue;
+        txt.placeholder = `Enter ${key}...`;
+        txt.oninput = () => syncFormToJson();
+        fg.appendChild(txt);
+      }
+
+      if (rule.description) {
+        const desc = document.createElement('div');
+        desc.className = 'field-desc';
+        desc.textContent = rule.description;
+        fg.appendChild(desc);
+      }
+
+      return fg;
+    }
+
+    function updateArrayIndices(container) {
+    function isObjectSchema(rule) {
+      if (!rule || typeof rule !== 'object') return false;
+      if (rule.type === 'object') return true;
+      if (rule.properties && typeof rule.properties === 'object') return true;
+      if (Array.isArray(rule.oneOf) && rule.oneOf.some(r => isObjectSchema(r))) return true;
+      if (Array.isArray(rule.anyOf) && rule.anyOf.some(r => isObjectSchema(r))) return true;
+      return false;
+    }
+
+    function escapeRegExp(string) {
+      return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function updateArrayIndices(container, fieldId) {
+      const prefixRegex = new RegExp(`^(${escapeRegExp(fieldId)})\\[\\d+\\]`);
+
+      Array.from(container.children).forEach((row, i) => {
+        const idx = row.querySelector('.array-row-index');
+        if (idx) idx.textContent = i + 1;
+        row.dataset.rowIndex = i;
+
+        const titleEl = row.querySelector('.array-row-object-title');
+        if (titleEl) {
+          const extra = container.dataset.arrayType === 'unstructured-object' ? ' (Object)' : '';
+          titleEl.textContent = `Item #${i + 1}${extra}`;
+        }
+
+        const idxEl = row.querySelector('.array-row-index');
+        if (idxEl) {
+          idxEl.textContent = i + 1;
+        }
+
+        // Update all data-field-path attributes in this row to match index i
+        const inputs = row.querySelectorAll('[data-field-path]');
+        inputs.forEach(input => {
+          const oldPath = input.dataset.fieldPath;
+          input.dataset.fieldPath = oldPath.replace(prefixRegex, `$1[${i}]`);
+        });
+
+        // Update nested array containers inside this row
+        const nestedArrays = row.querySelectorAll('[data-array-path]');
+        nestedArrays.forEach(na => {
+          const oldPath = na.dataset.arrayPath;
+          na.dataset.arrayPath = oldPath.replace(prefixRegex, `$1[${i}]`);
+        });
+      });
+    }
+
+    /* =========================================================================
+       7. Two-Way Form <-> JSON Synchronization
+       ========================================================================= */
+    function syncFormToJson() {
+      const payload = {};
+
+      // Collect scalar inputs
+      const inputs = formFieldsContainer.querySelectorAll('[data-field-path]');
+      inputs.forEach(input => {
+        const path = input.dataset.fieldPath;
+        let val = input.type === 'checkbox' ? input.checked : input.value;
+        if (input.type === 'number' && val !== '') val = Number(val);
+        setDeepValue(payload, path, val);
+      });
+
+      // Collect arrays
+      const arrayContainers = formFieldsContainer.querySelectorAll('[data-array-path]');
+      arrayContainers.forEach(container => {
+        const arrPath = container.dataset.arrayPath;
+        const arr = [];
+        Array.from(container.children).forEach(row => {
+          const inp = row.querySelector('input');
+          if (inp) {
+            let itemVal = inp.type === 'number' ? Number(inp.value) : inp.value;
+            try {
+              if (typeof itemVal === 'string' && (itemVal.startsWith('{') || itemVal.startsWith('['))) {
+                itemVal = JSON.parse(itemVal);
+              }
+            } catch {}
+            arr.push(itemVal);
+          }
+        });
+        setDeepValue(payload, arrPath, arr);
+      });
+
+      rawJsonTextarea.value = JSON.stringify(payload, null, 2);
+    function parsePathTokens(path) {
+      if (!path) return [];
+      const tokens = [];
+      const regex = /([a-zA-Z0-9_-]+)|\[(\d+)\]/g;
+      let match;
+      while ((match = regex.exec(path)) !== null) {
+        if (match[1] !== undefined) {
+          tokens.push(match[1]);
+        } else if (match[2] !== undefined) {
+          tokens.push(parseInt(match[2], 10));
+        }
+      }
+      return tokens;
+    }
+
+    function setDeepValue(obj, path, value) {
+      const parts = path.split('.');
+      const tokens = parsePathTokens(path);
+      if (tokens.length === 0) return;
+
+      let curr = obj;
+      for (let i = 0; i < parts.length - 1; i++) {
+        const p = parts[i];
+        if (!curr[p] || typeof curr[p] !== 'object') curr[p] = {};
+        curr = curr[p];
+      for (let i = 0; i < tokens.length - 1; i++) {
+        const key = tokens[i];
+        const nextKey = tokens[i + 1];
+
+        if (curr[key] === undefined || curr[key] === null || typeof curr[key] !== 'object') {
+          curr[key] = typeof nextKey === 'number' ? [] : {};
+        }
+        curr = curr[key];
+      }
+      curr[parts[parts.length - 1]] = value;
+
+      const lastKey = tokens[tokens.length - 1];
+      curr[lastKey] = value;
+    }
+
+    function getDeepValue(obj, path) {
+      if (!obj || typeof obj !== 'object') return undefined;
+      const parts = path.split('.');
+      const tokens = parsePathTokens(path);
+      let curr = obj;
+      for (const p of parts) {
+      for (const key of tokens) {
+        if (curr === null || curr === undefined) return undefined;
+        curr = curr[p];
+        curr = curr[key];
+      }
+      return curr;
+    }
+
+    function syncFormToJson() {
+      const payload = {};
+
+      // 1. Initialize all array containers as empty arrays in payload
+      const arrayContainers = formFieldsContainer.querySelectorAll('[data-array-path]');
+      arrayContainers.forEach(container => {
+        setDeepValue(payload, container.dataset.arrayPath, []);
+      });
+
+      // 2. Collect all inputs with data-field-path
+      const inputs = formFieldsContainer.querySelectorAll('[data-field-path]');
+      inputs.forEach(input => {
+        const path = input.dataset.fieldPath;
+        let val = input.type === 'checkbox' ? input.checked : input.value;
+        if (input.type === 'number' && val !== '') val = Number(val);
+
+        // If it's a textarea representing an unstructured object or raw JSON in an array row
+        if (input.tagName === 'TEXTAREA' && input.classList.contains('code-view')) {
+          try {
+            if (typeof val === 'string' && (val.trim().startsWith('{') || val.trim().startsWith('['))) {
+              val = JSON.parse(val);
+            }
+          } catch {}
+        }
+
+        setDeepValue(payload, path, val);
+      });
+
+      rawJsonTextarea.value = JSON.stringify(payload, null, 2);
+    }
+
+    function syncJsonToInputs(payload) {
+      if (!payload || typeof payload !== 'object') return;
+
+      // 1. Sync array containers: adjust number of rows to match payload array length
+      const arrayContainers = formFieldsContainer.querySelectorAll('[data-array-path]');
+      arrayContainers.forEach(container => {
+        const arrPath = container.dataset.arrayPath;
+        const arrVal = getDeepValue(payload, arrPath);
+
+        if (Array.isArray(arrVal) && typeof container._syncWithArray === 'function') {
+          container._syncWithArray(arrVal);
+        }
+      });
+
+      // 2. Populate inputs
+      const inputs = formFieldsContainer.querySelectorAll('[data-field-path]');
+      inputs.forEach(input => {
+        const path = input.dataset.fieldPath;
+        const val = getDeepValue(payload, path);
+        if (val !== undefined && document.activeElement !== input) {
+          if (input.type === 'checkbox') input.checked = Boolean(val);
+          else input.value = typeof val === 'object' ? JSON.stringify(val) : val;
+          else input.value = typeof val === 'object' ? JSON.stringify(val, null, 2) : val;
+        }
+      });
+
+      // 3. Update quick comma inputs if present
+      const quickCommaInputs = formFieldsContainer.querySelectorAll('[data-quick-comma-for]');
+      quickCommaInputs.forEach(qInp => {
+        const arrPath = qInp.dataset.quickCommaFor;
+        const arrVal = getDeepValue(payload, arrPath);
+        if (Array.isArray(arrVal) && document.activeElement !== qInp) {
+          qInp.value = arrVal.filter(v => v !== null && v !== undefined && typeof v !== 'object').join(', ');
+        }
+      });
+    }
+
+    rawJsonTextarea.addEventListener('input', () => {
+      try {
+        const parsed = JSON.parse(rawJsonTextarea.value);
+        syncJsonToInputs(parsed);
+      } catch {}
+    });
+
+    /* =========================================================================
+       8. File Upload & Dropzone Handling
+       ========================================================================= */
+    dropZone.onclick = () => fileInput.click();
+    fileInput.onchange = (e) => {
+      addFiles(e.target.files);
+    };
+
+    dropZone.ondragover = (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    };
+    dropZone.ondragleave = () => {
+      dropZone.classList.remove('dragover');
+    };
+    dropZone.ondrop = (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+      if (e.dataTransfer.files) {
+        addFiles(e.dataTransfer.files);
+      }
+    };
+
+    function addFiles(files) {
+      for (const f of files) {
+        state.attachedFiles.push(f);
+      }
+      renderFileChips();
+      const fileInp = formFieldsContainer.querySelector('[data-field-path*="file"]');
+      if (fileInp && !fileInp.value && state.attachedFiles.length > 0) {
+        fileInp.value = state.attachedFiles[0].name;
+        syncFormToJson();
+      }
+    }
+
+    function renderFileChips() {
+      fileChips.innerHTML = '';
+      state.attachedFiles.forEach((file, index) => {
+        const chip = document.createElement('div');
+        chip.className = 'file-chip';
+        chip.innerHTML = `
+          <span>📎 <strong>${escapeHtml(file.name)}</strong> (${formatBytes(file.size)})</span>
+          <span class="file-chip-remove" title="Remove file" onclick="removeFile(${index})">✕</span>
+        `;
+        fileChips.appendChild(chip);
+      });
+    }
+
+    window.removeFile = function(index) {
+      state.attachedFiles.splice(index, 1);
+      renderFileChips();
+    };
+
+    /* =========================================================================
+       9. Request Execution, Proxying & Response / File Download Handling
+       ========================================================================= */
+    btnExecuteRequest.onclick = async () => {
+      if (!state.currentEndpoint || !state.selectedRoute) return;
+
+      const route = state.selectedRoute;
+      let finalPath = route.path;
+
+      // Replace path parameters (e.g. [id])
+      const pathInputs = pathParamsContainer.querySelectorAll('[data-path-param]');
+      for (const inp of pathInputs) {
+        const pName = inp.dataset.pathParam;
+        if (!inp.value.trim()) {
+          alert(`Please fill in required path parameter: [${pName}]`);
+          inp.focus();
+          return;
+        }
+        finalPath = finalPath.replace(`[${pName}]`, encodeURIComponent(inp.value.trim()));
+      }
+
+      btnExecuteRequest.disabled = true;
+      btnExecuteRequest.textContent = '⏳ Sending...';
+      responseMeta.style.display = 'none';
+      downloadCard.style.display = 'none';
+      downloadPreview.style.display = 'none';
+      responseBodyView.textContent = 'Awaiting response...';
+
+      const method = (route.method || 'GET').toUpperCase();
+      let targetUrl = `${state.currentEndpoint.url.replace(/\/+$/, '')}${finalPath}`;
+
+      // Gather Payload
+      let body = null;
+      let headers = {};
+
+      if (state.currentEndpoint.cookies) {
+        headers['x-proxy-cookie'] = state.currentEndpoint.cookies;
+      }
+
+      // Check if files are attached -> use multipart/form-data
+      if (state.attachedFiles.length > 0) {
+        const fd = new FormData();
+        // Append all text fields from JSON
+        let textPayload = {};
+        try { textPayload = JSON.parse(rawJsonTextarea.value || '{}'); } catch {}
+        for (const [k, v] of Object.entries(textPayload)) {
+          fd.append(k, typeof v === 'object' ? JSON.stringify(v) : v);
+        }
+        // Append files under field "file"
+        for (const file of state.attachedFiles) {
+          fd.append('file', file, file.name);
+        }
+        body = fd;
+        // Fetch will auto-set multipart boundary when body is FormData
+      } else if (['POST', 'PUT', 'PATCH'].includes(method)) {
+        let jsonStr = rawJsonTextarea.value.trim() || '{}';
+        headers['Content-Type'] = 'application/json';
+        body = jsonStr;
+      } else if (method === 'GET') {
+        // Query parameters for GET
+        let qParams = {};
+        try { qParams = JSON.parse(rawJsonTextarea.value || '{}'); } catch {}
+        const queryEntries = Object.entries(qParams).filter(([_, v]) => v !== '' && v !== null && v !== undefined);
+        if (queryEntries.length > 0) {
+          const u = new URL(targetUrl);
+          for (const [k, v] of queryEntries) {
+            u.searchParams.set(k, typeof v === 'object' ? JSON.stringify(v) : v);
+          }
+          targetUrl = u.toString();
+        }
+      }
+
+      const startTime = performance.now();
+
+      try {
+        const proxyUrl = getProxyUrl(targetUrl);
+        const res = await fetch(proxyUrl, {
+          method: method === 'ANY' ? 'GET' : method,
+          headers,
+          body
+        });
+
+        const duration = Math.round(performance.now() - startTime);
+
+        // Check for Set-Cookie forwarded by proxy
+        const newCookie = res.headers.get('x-proxy-set-cookie');
+        if (newCookie) {
+          state.currentEndpoint.cookies = newCookie;
+          await dbSaveEndpoint(state.currentEndpoint);
+          updateSessionBadge();
+        }
+
+        // Render Status Code Badge
+        responseMeta.style.display = 'flex';
+        resStatusCode.textContent = `${res.status} ${res.statusText || ''}`;
+        resStatusCode.className = `status-badge-lg status-${Math.floor(res.status / 100)}xx`;
+        resTime.textContent = `${duration} ms`;
+
+        // Render Headers
+        const headerLines = [];
+        res.headers.forEach((val, key) => {
+          headerLines.push(`${key}: ${val}`);
+        });
+        responseHeadersView.textContent = headerLines.join('\n') || 'None';
+        responseCookiesView.textContent = state.currentEndpoint.cookies || 'No session cookies stored';
+
+        // Check for File Download / Binary Response
+        const contentType = res.headers.get('content-type') || '';
+        const contentDisp = res.headers.get('content-disposition') || '';
+        const isFileDownload = contentDisp.includes('attachment') ||
+                               contentType.startsWith('image/') ||
+                               contentType.startsWith('audio/') ||
+                               contentType.startsWith('video/') ||
+                               contentType.includes('application/octet-stream') ||
+                               contentType.includes('application/pdf');
+
+        const blob = await res.blob();
+        resSize.textContent = formatBytes(blob.size);
+
+        if (isFileDownload && blob.size > 0 && res.status < 400) {
+          // Auto File Download Handling
+          let filename = 'downloaded-file';
+          const nameMatch = contentDisp.match(/filename=["']?([^"';]+)["']?/i);
+          if (nameMatch) {
+            filename = nameMatch[1];
+          } else {
+            const ext = contentType.split('/')[1]?.split(';')[0] || 'bin';
+            filename = `file-${Date.now()}.${ext}`;
+          }
+
+          state.lastDownloadBlob = blob;
+          state.lastDownloadFilename = filename;
+
+          downloadFilename.textContent = filename;
+          downloadMetaText.textContent = `${formatBytes(blob.size)} • ${contentType}`;
+          downloadCard.style.display = 'flex';
+
+          // Media Previews
+          const objectUrl = URL.createObjectURL(blob);
+          downloadPreview.innerHTML = '';
+
+          if (contentType.startsWith('image/')) {
+            const img = document.createElement('img');
+            img.src = objectUrl;
+            downloadPreview.appendChild(img);
+            downloadPreview.style.display = 'flex';
+          } else if (contentType.startsWith('audio/')) {
+            const audio = document.createElement('audio');
+            audio.controls = true;
+            audio.src = objectUrl;
+            downloadPreview.appendChild(audio);
+            downloadPreview.style.display = 'flex';
+          } else if (contentType.startsWith('video/')) {
+            const video = document.createElement('video');
+            video.controls = true;
+            video.src = objectUrl;
+            downloadPreview.appendChild(video);
+            downloadPreview.style.display = 'flex';
+          }
+
+          responseBodyView.textContent = `[Binary File Stream Received: ${filename} (${formatBytes(blob.size)})]\nUse the Save/Download button above to save the file to disk.`;
+        } else {
+          // Text / JSON Response Handling
+          const text = await blob.text();
+          try {
+            const parsed = JSON.parse(text);
+            responseBodyView.textContent = JSON.stringify(parsed, null, 2);
+          } catch {
+            responseBodyView.textContent = text || `[Empty Response - HTTP ${res.status}]`;
+          }
+        }
+      } catch (err) {
+        const duration = Math.round(performance.now() - startTime);
+        responseMeta.style.display = 'flex';
+        resStatusCode.textContent = 'Error';
+        resStatusCode.className = 'status-badge-lg status-5xx';
+        resTime.textContent = `${duration} ms`;
+        resSize.textContent = '0 B';
+        responseBodyView.textContent = `Request failed: ${err.message}`;
+      } finally {
+        btnExecuteRequest.disabled = false;
+        btnExecuteRequest.textContent = '🚀 Send Request';
+      }
+    };
+
+    // Download Button Click
+    btnDownloadFile.onclick = () => {
+      if (!state.lastDownloadBlob) return;
+      const url = URL.createObjectURL(state.lastDownloadBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = state.lastDownloadFilename || 'download';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    };
+
+    // Copy Response Button
+    document.getElementById('btnCopyResponse').onclick = () => {
+      navigator.clipboard.writeText(responseBodyView.textContent);
+      const orig = document.getElementById('btnCopyResponse').textContent;
+      document.getElementById('btnCopyResponse').textContent = '✓ Copied';
+      setTimeout(() => document.getElementById('btnCopyResponse').textContent = orig, 1200);
+    };
+
+    /* =========================================================================
+       10. WebSocket Console
+       ========================================================================= */
+    const btnWsConnect = document.getElementById('btnWsConnect');
+    const btnWsDisconnect = document.getElementById('btnWsDisconnect');
+    const btnWsSend = document.getElementById('btnWsSend');
+    const wsStatusBadge = document.getElementById('wsStatusBadge');
+    const wsStatusText = document.getElementById('wsStatusText');
+    const wsLog = document.getElementById('wsLog');
+    const wsMessageInput = document.getElementById('wsMessageInput');
+
+    btnWsConnect.onclick = () => {
+      if (!state.selectedRoute || !state.currentEndpoint) return;
+      const wsUrl = state.currentEndpoint.url.replace(/^http/, 'ws') + state.selectedRoute.path;
+
+      wsLogMsg('system', `Connecting to WebSocket: ${wsUrl}...`);
+      setWsStatus('Connecting...', 'offline');
+
+      try {
+        const ws = new WebSocket(wsUrl);
+        state.currentWs = ws;
+
+        ws.onopen = () => {
+          setWsStatus('Connected', 'online');
+          btnWsConnect.disabled = true;
+          btnWsDisconnect.disabled = false;
+          btnWsSend.disabled = false;
+          wsLogMsg('system', `[Connected] WebSocket handshake succeeded.`);
+        };
+
+        ws.onmessage = (event) => {
+          wsLogMsg('in', event.data);
+        };
+
+        ws.onclose = (event) => {
+          setWsStatus('Disconnected', 'offline');
+          btnWsConnect.disabled = false;
+          btnWsDisconnect.disabled = true;
+          btnWsSend.disabled = true;
+          wsLogMsg('system', `[Closed] Socket connection closed (code: ${event.code}).`);
+        };
+
+        ws.onerror = (err) => {
+          wsLogMsg('system', `[Error] WebSocket error occurred.`);
+        };
+      } catch (err) {
+        wsLogMsg('system', `[Error] Failed to create WebSocket: ${err.message}`);
+      }
+    };
+
+    btnWsDisconnect.onclick = () => {
+      if (state.currentWs) {
+        state.currentWs.close();
+      }
+    };
+
+    btnWsSend.onclick = () => {
+      const msg = wsMessageInput.value.trim();
+      if (!msg || !state.currentWs || state.currentWs.readyState !== WebSocket.OPEN) return;
+      state.currentWs.send(msg);
+      wsLogMsg('out', msg);
+      wsMessageInput.value = '';
+    };
+
+    function wsLogMsg(type, text) {
+      const div = document.createElement('div');
+      div.className = `ws-msg ${type}`;
+      const time = new Date().toLocaleTimeString();
+      const prefix = type === 'in' ? '⬇ IN' : (type === 'out' ? '⬆ OUT' : '⚙ SYS');
+      div.innerHTML = `<span style="opacity:0.6">[${time}] ${prefix}:</span> <span>${escapeHtml(text)}</span>`;
+      wsLog.appendChild(div);
+      wsLog.scrollTop = wsLog.scrollHeight;
+    }
+
+    function setWsStatus(text, statusClass) {
+      wsStatusText.textContent = text;
+      wsStatusBadge.className = `status-pill status-${statusClass}`;
+    }
+
+    /* =========================================================================
+       11. Tab Switching & Modals
+       ========================================================================= */
+    // Request Tabs
+    document.querySelectorAll('.pane-request .pane-tab').forEach(tab => {
+      tab.onclick = () => {
+        document.querySelectorAll('.pane-request .pane-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const target = tab.dataset.tab;
+        if (target === 'form') {
+          try {
+            syncJsonToInputs(JSON.parse(rawJsonTextarea.value || '{}'));
+          } catch {}
+        }
+        document.getElementById('tabContentForm').style.display = target === 'form' ? 'block' : 'none';
+        document.getElementById('tabContentJson').style.display = target === 'json' ? 'block' : 'none';
+        document.getElementById('tabContentManifest').style.display = target === 'manifest' ? 'block' : 'none';
+        document.getElementById('tabContentWs').style.display = target === 'ws' ? 'block' : 'none';
+      };
+    });
+
+    // Response Tabs
+    document.querySelectorAll('.pane-response .pane-tab').forEach(tab => {
+      tab.onclick = () => {
+        document.querySelectorAll('.pane-response .pane-tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        const target = tab.dataset.resTab;
+        document.getElementById('resContentBody').style.display = target === 'body' ? 'block' : 'none';
+        document.getElementById('resContentHeaders').style.display = target === 'headers' ? 'block' : 'none';
+        document.getElementById('resContentCookies').style.display = target === 'cookies' ? 'block' : 'none';
+      };
+    });
+
+    // Add Endpoint Modal
+    document.getElementById('btnOpenAddModal').onclick = () => {
+      addEndpointModal.classList.add('open');
+    };
+    document.getElementById('btnCloseModal').onclick = () => addEndpointModal.classList.remove('open');
+    document.getElementById('btnCancelAdd').onclick = () => addEndpointModal.classList.remove('open');
+
+    document.getElementById('btnSaveEndpoint').onclick = async () => {
+      const name = document.getElementById('modalEndpointName').value.trim() || 'New Server';
+      const url = document.getElementById('modalEndpointUrl').value.trim();
+      if (!url) {
+        alert('Please specify a base URL');
+        return;
+      }
+      const newEp = {
+        id: 'ep_' + Date.now(),
+        name,
+        url: url.replace(/\/+$/, ''),
+        cookies: '',
+        addedAt: new Date().toISOString()
+      };
+      await dbSaveEndpoint(newEp);
+      state.endpoints.push(newEp);
+      renderEndpointSelect();
+      addEndpointModal.classList.remove('open');
+      selectEndpoint(newEp.id);
+    };
+
+    // Remove Endpoint
+    document.getElementById('btnDeleteEndpoint').onclick = async () => {
+      if (!state.currentEndpoint) return;
+      if (confirm(`Remove endpoint "${state.currentEndpoint.name}"?`)) {
+        await dbDeleteEndpoint(state.currentEndpoint.id);
+        state.endpoints = state.endpoints.filter(e => e.id !== state.currentEndpoint.id);
+        renderEndpointSelect();
+        if (state.endpoints.length > 0) {
+          selectEndpoint(state.endpoints[0].id);
+        } else {
+          state.currentEndpoint = null;
+          state.routes = [];
+          renderRouteTree();
+        }
+      }
+    };
+
+    // Session Cookie Modal
+    sessionPill.onclick = () => {
+      if (!state.currentEndpoint) return;
+      cookieTextarea.value = state.currentEndpoint.cookies || '';
+      cookieModal.classList.add('open');
+    };
+    document.getElementById('btnCloseCookieModal').onclick = () => cookieModal.classList.remove('open');
+    document.getElementById('btnClearCookie').onclick = async () => {
+      if (state.currentEndpoint) {
+        state.currentEndpoint.cookies = '';
+        await dbSaveEndpoint(state.currentEndpoint);
+        updateSessionBadge();
+        cookieModal.classList.remove('open');
+      }
+    };
+    document.getElementById('btnSaveCookie').onclick = async () => {
+      if (state.currentEndpoint) {
+        state.currentEndpoint.cookies = cookieTextarea.value.trim();
+        await dbSaveEndpoint(state.currentEndpoint);
+        updateSessionBadge();
+        cookieModal.classList.remove('open');
+      }
+    };
+
+    // Search input
+    routeSearch.oninput = () => renderRouteTree();
+    endpointSelect.onchange = (e) => selectEndpoint(e.target.value);
+    document.getElementById('btnRefreshTree').onclick = () => refreshEndpointTree();
+
+    // Format JSON Button
+    document.getElementById('btnFormatJson').onclick = () => {
+      try {
+        const parsed = JSON.parse(rawJsonTextarea.value);
+        rawJsonTextarea.value = JSON.stringify(parsed, null, 2);
+      } catch (err) {
+        alert('Invalid JSON: ' + err.message);
+      }
+    };
+
+    /* Utilities */
+    function formatBytes(bytes) {
+      if (bytes === 0 || !bytes) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // Start App
+    window.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
+</html>
