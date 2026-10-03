@@ -1,0 +1,23 @@
+# Binaries and build artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+.nxp-sockets/
+/tmp/nxp*
+
+# Coverage / profiling
+*.prof
+*.pprof
+coverage.txt
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
