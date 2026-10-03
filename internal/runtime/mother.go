@@ -4,24 +4,29 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"sync"
-	"time"
 
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/abi"
+	"github.com/Neuxbane/NeuXbaneProtocol/internal/codegen"
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/config"
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/router"
+	"github.com/Neuxbane/NeuXbaneProtocol/internal/scaffold"
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/telemetry"
 )
 
 // Mother is the top-level supervisor process orchestrating routes, workers, transports, and hot-reload.
 type Mother struct {
-	cfg        *config.Config
-	table      *router.Table
-	registry   *Registry
-	supervisor *Supervisor
-	watcher    *Watcher
-	mu         sync.Mutex
-	cancelFunc context.CancelFunc
+	cfg            *config.Config
+	table          *router.Table
+	registry       *Registry
+	supervisor     *Supervisor
+	watcher        *Watcher
+	currentBuildID string
+	onReloadHooks  []func(buildID string)
+	mu             sync.Mutex
+	cancelFunc     context.CancelFunc
 }
 
 // NewMother constructs an initialized Mother process instance.
@@ -59,12 +64,34 @@ func (m *Mother) Supervisor() *Supervisor {
 	return m.supervisor
 }
 
+// OnWorkerReload registers a hook invoked when a new worker build is activated.
+func (m *Mother) OnWorkerReload(fn func(buildID string)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onReloadHooks = append(m.onReloadHooks, fn)
+}
+
 // Start begins file watching and starts background lifecycle monitoring.
 func (m *Mother) Start(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	m.cancelFunc = cancel
 
-	// Start file watcher if in dev mode
+	workDir := filepath.Dir(m.cfg.DefineDir)
+	if workDir == "" {
+		workDir = "."
+	}
+
+	// 1. Scaffold workspace (define/, local abi/, go.mod, and README.md) if missing
+	if err := scaffold.EnsureAll(workDir, m.cfg.DefineDir); err != nil {
+		telemetry.Logger().Error("failed to ensure developer workspace", "err", err)
+	}
+
+	// 2. Perform initial worker codegen, build, and spawn
+	if err := m.RebuildAndSwapWorker(ctx); err != nil {
+		telemetry.Logger().Warn("initial worker build/spawn notice", "err", err)
+	}
+
+	// 3. Start file watcher if in dev mode
 	if m.cfg.Env == config.EnvDev {
 		watcher, err := NewWatcher(m.cfg.DefineDir, m.cfg.Debounce, func(files []string) {
 			m.TriggerReload(context.Background())
@@ -77,20 +104,65 @@ func (m *Mother) Start(ctx context.Context) error {
 		}
 	}
 
-	telemetry.Logger().Info("mother runtime started", "env", m.cfg.Env, "sock_dir", m.cfg.SocketDir)
+	telemetry.LogService("mother", "runtime started on env=%s (sock_dir: %s)", m.cfg.Env, m.cfg.SocketDir)
+	return nil
+}
+
+// RebuildAndSwapWorker compiles the worker from defineDir and atomically swaps routes.
+func (m *Mother) RebuildAndSwapWorker(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	workDir := filepath.Dir(m.cfg.DefineDir)
+	if workDir == "" {
+		workDir = "."
+	}
+
+	modulePath := scaffold.DetectModulePath(m.cfg.DefineDir)
+	workerDir := filepath.Join(workDir, ".nxp", "worker")
+	buildIDFile := filepath.Join(workDir, ".nxp-build-id")
+
+	buildID, err := codegen.GenerateWorkerProject(m.cfg.DefineDir, modulePath, workerDir, buildIDFile)
+	if err != nil {
+		return fmt.Errorf("codegen error: %w", err)
+	}
+
+	if buildID == m.currentBuildID {
+		telemetry.LogService("mother", "build ID unchanged (%s), skipping reload", buildID)
+		return nil
+	}
+
+	if err := os.MkdirAll(m.cfg.SocketDir, 0755); err != nil {
+		return fmt.Errorf("mkdir socket dir: %w", err)
+	}
+
+	binPath := filepath.Join(m.cfg.SocketDir, fmt.Sprintf("nxp-worker-%s", buildID))
+	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", binPath, "./.nxp/worker")
+	buildCmd.Dir = workDir
+	buildCmd.Stdout = os.Stdout
+	buildCmd.Stderr = os.Stderr
+	if err := buildCmd.Run(); err != nil {
+		return fmt.Errorf("go build worker error: %w", err)
+	}
+
+	_, err = m.supervisor.SpawnWorker(ctx, "nxp-worker", buildID, binPath)
+	if err != nil {
+		return fmt.Errorf("spawn worker error: %w", err)
+	}
+
+	m.currentBuildID = buildID
+	for _, hook := range m.onReloadHooks {
+		hook(buildID)
+	}
+	telemetry.LogService("mother", "worker live and route swap completed (build: %s)", buildID)
 	return nil
 }
 
 // TriggerReload triggers rebuilding and hot swapping workers when define/ changes.
 func (m *Mother) TriggerReload(ctx context.Context) {
-	telemetry.Logger().Info("triggering hot reload of workers")
-	// Rebuild and spawn updated worker
-	buildID := fmt.Sprintf("bld-%d", time.Now().UnixNano())
-	_, err := m.supervisor.BuildAndSpawnWorker(ctx, "nxp-worker", buildID, "./cmd/nxp-worker", "")
-	if err != nil {
-		telemetry.Logger().Error("worker reload failed", "err", err)
-	} else {
-		telemetry.Logger().Info("worker hot reload succeeded", "build_id", buildID)
+	telemetry.LogService("mother", "triggering hot reload of workers from define/ changes")
+	if err := m.RebuildAndSwapWorker(ctx); err != nil {
+		telemetry.LogService("mother", "ERROR worker reload failed: %v", err)
 	}
 }
 
@@ -101,7 +173,7 @@ func (m *Mother) Dispatch(ctx context.Context, req *abi.Request) (*abi.Response,
 
 // Shutdown drains all workers and terminates background tasks.
 func (m *Mother) Shutdown(ctx context.Context) error {
-	telemetry.Logger().Info("shutting down mother process, draining workers...")
+	telemetry.LogService("mother", "shutting down mother process, draining workers...")
 	if m.cancelFunc != nil {
 		m.cancelFunc()
 	}
@@ -112,6 +184,6 @@ func (m *Mother) Shutdown(ctx context.Context) error {
 	// Drain all workers
 	err := m.supervisor.DrainAll(ctx)
 	_ = os.RemoveAll(m.cfg.SocketDir)
-	telemetry.Logger().Info("mother process shutdown complete")
+	telemetry.LogService("mother", "mother process shutdown complete")
 	return err
 }

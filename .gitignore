@@ -9,6 +9,13 @@ bin/
 *.out
 .nxp-sockets/
 /tmp/nxp*
+.nxp/
+**/.nxp/
+.nxp-build-id
+**/.nxp-build-id
+nxp-worker
+example/nxp-server
+example/sample.mp4
 
 # Coverage / profiling
 *.prof

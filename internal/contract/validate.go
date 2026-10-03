@@ -2,6 +2,7 @@ package contract
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/abi"
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/errors"
@@ -100,6 +101,17 @@ func ValidateResponse(route *abi.Route, resp *abi.Response) *errors.Error {
 
 	// If worker returned an error response, egress status checking applies
 	if resp.Error != nil {
+		return nil
+	}
+
+	// Skip schema validation for file streaming, downloads, redirects, or non-JSON payloads
+	if resp.Metadata != nil && (resp.Metadata["file_source"] != "" || resp.Metadata["file_path"] != "" || resp.Metadata["redirect"] != "") {
+		return nil
+	}
+	if resp.Status >= 300 && resp.Status < 400 {
+		return nil
+	}
+	if ct := resp.Header("Content-Type"); ct != "" && !strings.Contains(ct, "json") {
 		return nil
 	}
 

@@ -189,3 +189,51 @@ func TestIntrospectContentNegotiation(t *testing.T) {
 		t.Errorf("expected definitions in schema bundle")
 	}
 }
+
+func TestIntrospectQueryParameters(t *testing.T) {
+	tbl := setupTestTable()
+	cfg := config.DefaultConfig().Introspect
+	cfg.Public = true
+	interceptor := introspect.NewInterceptor(cfg, "bld-test-query")
+
+	// 1. ?nxp (default json)
+	reqDefault := httptest.NewRequest("GET", "/auth?nxp", nil)
+	recDefault := httptest.NewRecorder()
+	interceptor.Intercept(recDefault, reqDefault, tbl)
+
+	if !strings.Contains(recDefault.Header().Get("Content-Type"), "application/json") {
+		t.Errorf("expected ?nxp to default to application/json, got %s", recDefault.Header().Get("Content-Type"))
+	}
+	var defaultObj map[string]any
+	if err := json.Unmarshal(recDefault.Body.Bytes(), &defaultObj); err != nil {
+		t.Errorf("expected valid JSON for ?nxp default, got error: %v", err)
+	}
+
+	// 2. ?nxp=json
+	reqJSON := httptest.NewRequest("GET", "/auth?nxp=json", nil)
+	reqJSON.Header.Set("Accept", "text/html") // Accept header overridden by explicit query param
+	recJSON := httptest.NewRecorder()
+	interceptor.Intercept(recJSON, reqJSON, tbl)
+
+	if !strings.Contains(recJSON.Header().Get("Content-Type"), "application/json") {
+		t.Errorf("expected ?nxp=json to return application/json, got %s", recJSON.Header().Get("Content-Type"))
+	}
+	var jsonObj map[string]any
+	if err := json.Unmarshal(recJSON.Body.Bytes(), &jsonObj); err != nil {
+		t.Errorf("expected valid JSON for ?nxp=json, got error: %v", err)
+	}
+
+	// 3. ?nxp=html
+	reqHTML := httptest.NewRequest("GET", "/auth?nxp=html", nil)
+	reqHTML.Header.Set("Accept", "application/json") // Accept header overridden by explicit query param
+	recHTML := httptest.NewRecorder()
+	interceptor.Intercept(recHTML, reqHTML, tbl)
+
+	if !strings.Contains(recHTML.Header().Get("Content-Type"), "text/html") {
+		t.Errorf("expected ?nxp=html to return text/html, got %s", recHTML.Header().Get("Content-Type"))
+	}
+	htmlBody := recHTML.Body.String()
+	if !strings.Contains(htmlBody, "<!DOCTYPE html>") || !strings.Contains(htmlBody, "Interactive Tester") {
+		t.Errorf("expected rich HTML tester page for ?nxp=html, got: %s", htmlBody[:min(200, len(htmlBody))])
+	}
+}

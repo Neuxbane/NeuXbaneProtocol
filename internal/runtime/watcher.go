@@ -93,7 +93,7 @@ func (w *Watcher) eventLoop(ctx context.Context) {
 		}
 		changedFiles = make(map[string]struct{})
 
-		telemetry.Logger().Info("filesystem changes detected under define/", "files_count", len(files))
+		telemetry.LogService("watcher", "filesystem changes detected under define/ (%d files)", len(files))
 		if w.onReload != nil {
 			w.onReload(files)
 		}
@@ -108,10 +108,22 @@ func (w *Watcher) eventLoop(ctx context.Context) {
 				return
 			}
 
-			// If new directory created, watch it
+			// If new directory created, watch it and track any contained .go files
 			if event.Has(fsnotify.Create) {
 				if info, err := os.Stat(event.Name); err == nil && info.IsDir() {
 					_ = w.watchRecursive(event.Name)
+					_ = filepath.Walk(event.Name, func(p string, fi os.FileInfo, err error) error {
+						if err == nil && !fi.IsDir() && strings.HasSuffix(p, ".go") {
+							mu.Lock()
+							changedFiles[p] = struct{}{}
+							if timer != nil {
+								timer.Stop()
+							}
+							timer = time.AfterFunc(w.debounce, trigger)
+							mu.Unlock()
+						}
+						return nil
+					})
 					continue
 				}
 			}

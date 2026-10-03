@@ -2,7 +2,7 @@
 //
 // Design Decision:
 // One generic nxp-worker binary is compiled per project build, linking the generated route table
-// from internal/generated. This avoids recompiling the worker runtime infrastructure on every hot reload,
+// from the generated package. This avoids recompiling the worker runtime infrastructure on every hot reload,
 // providing fast reload cycles (<500ms) while keeping workers strictly isolated in their own OS processes.
 package worker
 
@@ -19,9 +19,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Neuxbane/NeuXbaneProtocol/internal/ipc"
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/abi"
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/errors"
-	"github.com/Neuxbane/NeuXbaneProtocol/internal/ipc"
 )
 
 // HandlerFunc is the internal dispatch adapter for a business logic route handler.
@@ -36,11 +36,10 @@ type Runtime struct {
 	handlers   map[abi.HandlerID]HandlerFunc
 	handlersMu sync.RWMutex
 
-	client     *ipc.Client
-	conn       net.Conn
-	inFlight   atomic.Int64
-	draining   atomic.Bool
-	stopChan   chan struct{}
+	conn     net.Conn
+	inFlight atomic.Int64
+	draining atomic.Bool
+	stopChan chan struct{}
 }
 
 // NewRuntime initializes a worker Runtime instance.

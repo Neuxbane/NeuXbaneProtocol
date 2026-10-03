@@ -127,6 +127,105 @@ func NewResponse(status int, body []byte) *Response {
 	}
 }
 
+// DownloadResult represents a file asset to download or stream.
+type DownloadResult struct {
+	Source    string `json:"source"`
+	Name      string `json:"name,omitempty"`
+	Mime      string `json:"mime,omitempty"`
+	Presigned bool   `json:"presigned,omitempty"`
+}
+
+// RawResponse represents a response with custom Content-Type and raw byte body.
+type RawResponse struct {
+	ContentType string `json:"content_type"`
+	Data        []byte `json:"data"`
+}
+
+// NewAutoResponse inspects the return value from a handler and creates an appropriate Response.
+func NewAutoResponse(proto *Response, defaultStatus int, data any) (*Response, error) {
+	if proto == nil {
+		proto = NewResponse(defaultStatus, nil)
+	}
+	if proto.Status == 0 {
+		proto.Status = defaultStatus
+	}
+	if proto.Metadata == nil {
+		proto.Metadata = make(map[string]string)
+	}
+
+	if data == nil {
+		return proto, nil
+	}
+
+	switch v := data.(type) {
+	case DownloadResult:
+		proto.Metadata["file_source"] = v.Source
+		proto.Metadata["file_name"] = v.Name
+		proto.Metadata["file_mime"] = v.Mime
+		if v.Presigned {
+			proto.Metadata["presigned"] = "true"
+		}
+		if v.Mime != "" && proto.Header("Content-Type") == "" {
+			proto.SetHeader("Content-Type", v.Mime)
+		}
+		return proto, nil
+	case *DownloadResult:
+		if v != nil {
+			proto.Metadata["file_source"] = v.Source
+			proto.Metadata["file_name"] = v.Name
+			proto.Metadata["file_mime"] = v.Mime
+			if v.Presigned {
+				proto.Metadata["presigned"] = "true"
+			}
+			if v.Mime != "" && proto.Header("Content-Type") == "" {
+				proto.SetHeader("Content-Type", v.Mime)
+			}
+		}
+		return proto, nil
+	case RawResponse:
+		proto.Body = v.Data
+		if v.ContentType != "" {
+			proto.SetHeader("Content-Type", v.ContentType)
+		}
+		return proto, nil
+	case *RawResponse:
+		if v != nil {
+			proto.Body = v.Data
+			if v.ContentType != "" {
+				proto.SetHeader("Content-Type", v.ContentType)
+			}
+		}
+		return proto, nil
+	case []byte:
+		proto.Body = v
+		if proto.Header("Content-Type") == "" {
+			proto.SetHeader("Content-Type", "application/octet-stream")
+		}
+		return proto, nil
+	case string:
+		proto.Body = []byte(v)
+		if proto.Header("Content-Type") == "" {
+			trimmed := strings.TrimSpace(v)
+			if strings.HasPrefix(trimmed, "<") {
+				proto.SetHeader("Content-Type", "text/html; charset=utf-8")
+			} else {
+				proto.SetHeader("Content-Type", "text/plain; charset=utf-8")
+			}
+		}
+		return proto, nil
+	default:
+		bytes, err := json.Marshal(data)
+		if err != nil {
+			return nil, errors.New(errors.CodeInternal, "failed to marshal response JSON: "+err.Error(), 500).WithCause(err)
+		}
+		proto.Body = bytes
+		if proto.Header("Content-Type") == "" {
+			proto.SetHeader("Content-Type", "application/json; charset=utf-8")
+		}
+		return proto, nil
+	}
+}
+
 // NewJSONResponse serializes data as JSON and creates a 200/status Response.
 func NewJSONResponse(status int, data any) (*Response, error) {
 	bytes, err := json.Marshal(data)

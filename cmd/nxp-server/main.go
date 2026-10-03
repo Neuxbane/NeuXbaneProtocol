@@ -18,11 +18,13 @@ import (
 func main() {
 	addr := flag.String("addr", ":8080", "Server listen address")
 	env := flag.String("env", "dev", "Environment (dev, staging, prod)")
+	defineDir := flag.String("define", "define", "Path to define/ directory")
 	flag.Parse()
 
 	cfg := config.DefaultConfig()
 	cfg.Addr = *addr
 	cfg.Env = config.Environment(*env)
+	cfg.DefineDir = *defineDir
 
 	mother, err := runtime.NewMother(cfg)
 	if err != nil {
@@ -33,6 +35,11 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	interceptor := introspect.NewInterceptor(cfg.Introspect, "build-init")
+	mother.OnWorkerReload(func(buildID string) {
+		interceptor.SetBuildID(buildID)
+	})
+
 	if err := mother.Start(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to start mother: %v\n", err)
 		os.Exit(1)
@@ -40,7 +47,6 @@ func main() {
 
 	// Mount REST adapter
 	restAdapter := rest.NewAdapter(mother.Dispatch)
-	interceptor := introspect.NewInterceptor(cfg.Introspect, "build-init")
 	restAdapter.SetIntrospector(interceptor.Intercept)
 
 	listener, err := net.Listen("tcp", cfg.Addr)
@@ -52,11 +58,16 @@ func main() {
 	// Mount Debug server
 	_ = debug.NewServer(mother)
 
-	telemetry.Logger().Info("nxp-server listening", "addr", cfg.Addr, "env", cfg.Env)
+	tcpAddr, ok := listener.Addr().(*net.TCPAddr)
+	portStr := cfg.Addr
+	if ok {
+		portStr = fmt.Sprintf("%d", tcpAddr.Port)
+	}
+	telemetry.LogService("nxp-server", "listening on http://localhost:%s (port %s, env: %s)", portStr, portStr, cfg.Env)
 
 	go func() {
 		if err := restAdapter.Serve(&listener, mother.Table()); err != nil {
-			telemetry.Logger().Error("rest server terminated", "err", err)
+			telemetry.LogService("nxp-server", "rest server terminated: %v", err)
 		}
 	}()
 

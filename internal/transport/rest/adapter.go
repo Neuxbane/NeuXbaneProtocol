@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -117,6 +118,62 @@ func (a *Adapter) Render(w io.Writer, resp *abi.Response, ctx transport.RenderCt
 		return err
 	}
 
+	// Handle file asset streaming or presigned URL redirection
+	if redir := resp.Metadata["redirect"]; redir != "" {
+		for k, vals := range resp.Headers {
+			for _, val := range vals {
+				rw.Header().Add(k, val)
+			}
+		}
+		rw.Header().Set("Location", redir)
+		status := resp.Status
+		if status < 300 || status >= 400 {
+			status = http.StatusTemporaryRedirect
+		}
+		rw.WriteHeader(status)
+		return nil
+	}
+
+	fileSource := resp.Metadata["file_source"]
+	if fileSource == "" {
+		fileSource = resp.Metadata["file_path"]
+	}
+
+	if fileSource != "" {
+		if resp.Metadata["presigned"] == "true" || strings.HasPrefix(fileSource, "http://") || strings.HasPrefix(fileSource, "https://") {
+			for k, vals := range resp.Headers {
+				for _, val := range vals {
+					rw.Header().Add(k, val)
+				}
+			}
+			rw.Header().Set("Location", fileSource)
+			status := resp.Status
+			if status < 300 || status >= 400 {
+				status = http.StatusTemporaryRedirect
+			}
+			rw.WriteHeader(status)
+			return nil
+		}
+
+		if fileInfo, err := os.Stat(fileSource); err == nil && !fileInfo.IsDir() {
+			for k, vals := range resp.Headers {
+				for _, val := range vals {
+					rw.Header().Add(k, val)
+				}
+			}
+			if resp.Metadata["file_name"] != "" && rw.Header().Get("Content-Disposition") == "" {
+				rw.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, resp.Metadata["file_name"]))
+			}
+			if resp.Metadata["file_mime"] != "" && rw.Header().Get("Content-Type") == "" {
+				rw.Header().Set("Content-Type", resp.Metadata["file_mime"])
+			}
+			if req, ok := ctx.Raw.(*http.Request); ok && req != nil {
+				http.ServeFile(rw, req, fileSource)
+				return nil
+			}
+		}
+	}
+
 	// Compute ETag
 	bodyHash := sha256.Sum256(resp.Body)
 	etag := fmt.Sprintf(`W/"%s"`, hex.EncodeToString(bodyHash[:8]))
@@ -198,7 +255,40 @@ func (a *Adapter) Serve(listener *net.Listener, table *router.Table) error {
 	return a.server.Serve(*listener)
 }
 
+type statusWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusWriter) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusWriter) Write(b []byte) (int, error) {
+	if s.status == 0 {
+		s.status = http.StatusOK
+	}
+	return s.ResponseWriter.Write(b)
+}
+
 func (a *Adapter) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	sw := &statusWriter{ResponseWriter: w, status: 200}
+
+	defer func() {
+		duration := time.Since(start)
+		clientIP := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(clientIP); err == nil {
+			clientIP = host
+		}
+		path := r.URL.Path
+		if r.URL.RawQuery != "" {
+			path += "?" + r.URL.RawQuery
+		}
+		telemetry.LogRequest(r.Method, path, clientIP, sw.status, duration, "")
+	}()
+
 	// 1. Intercept ?nxp before route dispatch
 	a.mu.RLock()
 	introspectFn := a.introspectFn
@@ -207,7 +297,7 @@ func (a *Adapter) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	a.mu.RUnlock()
 
 	if r.URL.Query().Has("nxp") && introspectFn != nil {
-		if handled := introspectFn(w, r, table); handled {
+		if handled := introspectFn(sw, r, table); handled {
 			return
 		}
 	}
@@ -215,15 +305,17 @@ func (a *Adapter) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// 2. Normalize HTTP request
 	abiReq, err := a.Normalize(r)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		sw.WriteHeader(http.StatusBadRequest)
+		_, _ = sw.Write([]byte(err.Error()))
 		return
 	}
 
 	// 3. Look up route in table
 	entry, params, found := table.Load(abi.TransportREST, r.Method, r.URL.Path)
 	if !found {
+		sw.status = http.StatusNotFound
 		errResp := abi.NewErrorResponse(errors.ErrNotFound)
-		_ = a.Render(w, errResp, transport.RenderCtx{Raw: r})
+		_ = a.Render(sw, errResp, transport.RenderCtx{Raw: r})
 		return
 	}
 
@@ -235,21 +327,24 @@ func (a *Adapter) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	// 4. Validate Ingress contract in mother process (Principle 3: The mother enforces, the worker trusts)
 	if valErr := contract.ValidateRequest(&entry.Route, abiReq); valErr != nil {
 		telemetry.GlobalMetrics.ContractViolations.Add(1)
+		sw.status = http.StatusBadRequest
 		errResp := abi.NewErrorResponse(valErr)
-		_ = a.Render(w, errResp, transport.RenderCtx{Raw: r})
+		_ = a.Render(sw, errResp, transport.RenderCtx{Raw: r})
 		return
 	}
 
 	// 5. Dispatch request to worker
 	if dispatcher == nil {
-		http.Error(w, "dispatcher not configured", http.StatusServiceUnavailable)
+		sw.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = sw.Write([]byte("dispatcher not configured"))
 		return
 	}
 
 	abiResp, err := dispatcher(r.Context(), abiReq)
 	if err != nil {
+		sw.status = http.StatusServiceUnavailable
 		errResp := abi.NewErrorResponse(errors.New(errors.CodeContractWorkerUnavailable, err.Error(), 503))
-		_ = a.Render(w, errResp, transport.RenderCtx{Raw: r})
+		_ = a.Render(sw, errResp, transport.RenderCtx{Raw: r})
 		return
 	}
 
@@ -257,13 +352,17 @@ func (a *Adapter) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	if egressErr := contract.ValidateResponse(&entry.Route, abiResp); egressErr != nil {
 		telemetry.GlobalMetrics.ContractViolations.Add(1)
 		_ = contract.HandleEgressViolation(contract.EgressPolicyQuarantine, entry.WorkerName, egressErr)
+		sw.status = http.StatusInternalServerError
 		errResp := abi.NewErrorResponse(egressErr)
-		_ = a.Render(w, errResp, transport.RenderCtx{Raw: r})
+		_ = a.Render(sw, errResp, transport.RenderCtx{Raw: r})
 		return
 	}
 
 	// 7. Render response to client
-	_ = a.Render(w, abiResp, transport.RenderCtx{Raw: r})
+	if abiResp != nil && abiResp.Status != 0 {
+		sw.status = abiResp.Status
+	}
+	_ = a.Render(sw, abiResp, transport.RenderCtx{Raw: r})
 }
 
 // Shutdown gracefully terminates the HTTP server.
