@@ -1,9 +1,0 @@
-{
-  "name": "nxp-testing-server",
-  "version": "1.0.0",
-  "description": "Interactive web-based testing workbench and explorer for NeuXbane Protocol endpoints",
-  "type": "module",
-  "scripts": {
-    "start": "node server.js"
-  }
-}
