@@ -1,66 +1,64 @@
-# NeuXbaneProtocol (nxp) — Production Go Backend Framework
+# nxp Standalone Server
 
-**`nxp`** is a high-performance, production-grade Go backend framework that empowers developers to write **only business logic** under a `define/` directory tree, while the framework handles routing, contracts, transports, file handling, WebRTC SFU, hot reload, and introspection.
+This project runs on the standalone **nxp** backend framework.
 
+## 100% Self-Contained Binary
+The `nxp-server` executable embeds everything it needs:
+- **Zero external Git dependencies**: Developers do not need to clone or download `github.com/Neuxbane/NeuXbaneProtocol`.
+- **Offline compilation**: Handlers and workers compile completely locally using the local `abi/` layer.
+- **Single-binary portability**: Share only the `nxp-server` binary. On first run, it scaffolds all required files and documentation.
+
+## Developer Quickstart
+
+All business logic lives inside `define/`.
+You do NOT need to write HTTP routers, chunk logic, or schema manifests.
+
+### 1. Handler Signature
+
+Every route handler implements:
 ```go
-func Handler(ctx *DOMAIN.Ctx) (Result, error)
+func Handler(ctx *rest.Ctx) (Result, error)
 ```
 
-Developers never touch `net/http`, socket file descriptors, low-level chunk buffers, or raw schemas.
+### 2. Clean Local ABI Imports
 
----
+Handlers import the server-generated `abi` packages directly:
+```go
+package define
 
-## Non-Negotiable Principles
+import (
+    "abi/rest"
+)
 
-1. **The tree is the config.** `define/**/*.go` defines routes. No route manifests, no `contract.json`. `index.go` maps to the parent path (`/auth/index.go` -> `/auth`), never to `/auth/index`.
-2. **Types are the contract.** Go struct tags reflect into JSON Schema Draft 2020-12 at build time via codegen. No hand-written schemas.
-3. **The mother enforces, the worker trusts.** Ingress and egress validation happen in the mother process before/after the worker. Workers never validate inbound payloads.
-4. **`nxp/*` is the only developer-visible API tree.** `define/*` may import `nxp/*` and stdlib only (enforced in CI).
-5. **`internal/*` never imports `define/*`.** The mother learns routes from worker `Hello` frames at runtime.
-6. **Adding a transport = adding an adapter.** Never modify `runtime`, `router`, `ipc`, `worker`, or `contract` to add a transport.
-7. **Every dependency cycle is a bug.** Enforce dependency acyclicity in CI.
-8. **Hot reload is a rebuild + Hello + atomic route swap + graceful drain.** No in-process plugin loading, ever.
+type WelcomeResult struct {
+    Message string `json:"message" validate:"required"`
+    Status  string `json:"status"  validate:"required"`
+}
 
----
+func Handler(ctx *rest.Ctx) (WelcomeResult, error) {
+    return WelcomeResult{
+        Message: "Welcome to nxp framework!",
+        Status:  "operational",
+    }, nil
+}
+```
 
-## Architecture Overview
+Alternatively, you can use the unified import:
+```go
+import "abi"
 
-- **Mother Process:** Owns listener sockets, config, contract validation, routing tables, and worker supervisors.
-- **Worker Processes:** Subprocesses running business handlers linked with the generated route registry. Communicate over framed Unix domain sockets.
-- **Codegen (`nxp-codegen`):** Walks `define/`, inspects handler AST signatures, calculates build content hashes, and generates `internal/generated/routes_gen.go`.
-- **Introspection (`?nxp`):** Intercepted in Mother before route dispatch, serving `application/json`, `text/plain`, `text/html`, `application/openapi+json`, `application/asyncapi+json`, and `/__nxp/schema`.
-- **Transports:** Pluggable adapters for REST, WebSocket, gRPC, UDP, WebRTC SFU, MQTT, NATS, AMQP, Redis, and Kafka.
+func Handler(ctx *abi.Ctx) (WelcomeResult, error)
+```
 
----
+### 3. Running the Server
 
-## Getting Started
-
-### 1. Build & Run Codegen
+Start the server:
 ```bash
-go run ./cmd/nxp-codegen
+./nxp-server -addr :8080 -env dev
 ```
 
-### 2. Build the Binaries
-```bash
-go build -o bin/nxp-server ./cmd/nxp-server
-go build -o bin/nxp-worker ./cmd/nxp-worker
-```
+- Test endpoint: `curl http://localhost:8080/`
+- Test introspection: `curl http://localhost:8080/?nxp`
+- Hot reload: edit any file in `define/` and save. Changes take effect in <500ms without restarting the server!
 
-### 3. Run the Server
-```bash
-./bin/nxp-server -addr :8080 -env dev
-```
-
-### 4. Run the Test Suite
-```bash
-go test ./...
-```
-
----
-
-## Documentation
-
-- [Architecture & Design](docs/architecture.md)
-- [Contracts & Schema Enforcement](docs/contracts.md)
-- [Writing Handlers](docs/writing-handlers.md)
-- [Transports & Adapters](docs/transports.md)
+See `define/HOW_TO_DEFINE.md` and `define/ABI.md` for comprehensive guides.

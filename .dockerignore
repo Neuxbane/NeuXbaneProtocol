@@ -1,0 +1,33 @@
+# Build context exclusions — keep the image build lean and reproducible.
+
+# VCS / editor
+.git/
+.gitignore
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Build artifacts / local state
+bin/
+*.exe
+*.test
+*.out
+*.prof
+*.pprof
+coverage.txt
+.nxp/
+**/.nxp/
+.nxp-build-id
+**/.nxp-build-id
+nxp-worker
+nxp-server
+example/nxp-server
+example/sample.mp4
+
+# Docker artifacts
+Dockerfile
+docker-compose.yml
+build.sh
+*.tar.gz

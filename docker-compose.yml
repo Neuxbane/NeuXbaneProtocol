@@ -1,0 +1,41 @@
+# ---------------------------------------------------------------------------
+# NeuXbaneProtocol (nxp) — local docker compose
+#
+#   docker compose up --build        # build image + start
+#   docker compose logs -f           # follow logs
+#   docker compose down              # stop (keeps the data volume)
+#   docker compose down -v           # stop and wipe persisted data
+#
+# The image is fully precompiled (no Go toolchain, no shell at runtime). The
+# Dockerfile builds both the mother (nxp-server) and the worker (backend) from
+# source, so no prebuilt binary needs to be present in this directory.
+# ---------------------------------------------------------------------------
+
+services:
+  nxp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nxp:local
+    container_name: nxp
+    restart: unless-stopped
+    ports:
+      - "${NXP_PORT:-8080}:8080"
+
+    environment:
+      NXP_ENV: "${NXP_ENV:-prod}"
+      NXP_ADDR: ":8080"
+      NXP_PRECOMPILED: "1"
+      NXP_BACKEND_BIN: /app/backend
+      NXP_SOCK_DIR: /tmp/nxp-sockets
+
+    volumes:
+      # Persisted application state survives rebuilds.
+      - nxp-data:/data
+
+    # distroless has no shell/wget, so the healthcheck is defined in the
+    # Dockerfile only when a probe binary is available. Compose relies on the
+    # container's own liveness (restart: unless-stopped) instead.
+
+volumes:
+  nxp-data:
