@@ -39,7 +39,22 @@ func ValidateRequest(route *abi.Route, req *abi.Request) *errors.Error {
 		}
 	}
 
-	// 4. Body schema validation against route Shape
+	// 4. Guard dependencies check
+	if len(route.Guards) > 0 {
+		if req.Identity == nil || !req.Identity.IsAuthenticated() {
+			return errors.New(CodeRequestUnauthorized, fmt.Sprintf("guard check failed: requires %v", route.Guards), 401).
+				WithViolation(FormatViolation("", strings.Join(route.Guards, ", "), "unauthenticated", "guard check failed", CodeRequestUnauthorized))
+		}
+		// If specific guard scopes/roles are tagged on identity, ensure compliance
+		for _, guardName := range route.Guards {
+			if guardName != "" && !req.Identity.HasScope(guardName) && !req.Identity.HasRole(guardName) && !req.Identity.IsAuthenticated() {
+				return errors.New(CodeRequestUnauthorized, fmt.Sprintf("guard check failed: missing guard %s", guardName), 401).
+					WithViolation(FormatViolation("", guardName, "missing guard", "guard check failed", CodeRequestUnauthorized))
+			}
+		}
+	}
+
+	// 5. Body schema validation against route Shape
 	if route.Shape != nil {
 		switch s := route.Shape.(type) {
 		case abi.RequestResponseShape:

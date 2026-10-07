@@ -1,5 +1,6 @@
+// @desc Meeting room WebRTC session
 // @transport webrtc
-package meet
+package rtc
 
 import (
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/rtc"

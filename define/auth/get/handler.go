@@ -1,7 +1,8 @@
 // Package auth handles authentication operations.
+// @desc Get the caller profile status
 // @auth required
 // @ratelimit 20 40
-package auth
+package get
 
 import (
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/rest"

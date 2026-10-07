@@ -2,7 +2,10 @@ package introspect
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
+
+	"github.com/Neuxbane/NeuXbaneProtocol/nxp/abi"
 )
 
 // RenderOpenAPI produces an OpenAPI 3.1 fragment for the current route level.
@@ -13,7 +16,7 @@ func RenderOpenAPI(view *Response) ([]byte, error) {
 	if view.Self != nil {
 		for _, m := range view.Self.Methods {
 			methodLower := strings.ToLower(m)
-			pathItem[methodLower] = map[string]any{
+			op := map[string]any{
 				"operationId": view.Self.Handler + "." + m,
 				"summary":     "Handler for " + view.Path,
 				"responses": map[string]any{
@@ -22,6 +25,38 @@ func RenderOpenAPI(view *Response) ([]byte, error) {
 					},
 				},
 			}
+
+			// Attach the per-method schema contract. The same path served by
+			// different methods has distinct request/response shapes.
+			if shape, ok := view.Self.Schemas[m]; ok && shape != nil {
+				if rr, ok := shape.(abi.RequestResponseShape); ok {
+					if rr.Request != nil {
+						op["requestBody"] = map[string]any{
+							"content": map[string]any{
+								"application/json": map[string]any{
+									"schema": rr.Request,
+								},
+							},
+						}
+					}
+					if len(rr.Responses) > 0 {
+						responses := make(map[string]any, len(rr.Responses))
+						for code, s := range rr.Responses {
+							responses[strconv.Itoa(code)] = map[string]any{
+								"description": "Response",
+								"content": map[string]any{
+									"application/json": map[string]any{
+										"schema": s,
+									},
+								},
+							}
+						}
+						op["responses"] = responses
+					}
+				}
+			}
+
+			pathItem[methodLower] = op
 		}
 	}
 

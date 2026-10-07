@@ -1,5 +1,5 @@
-// @route /items/{id}
-package item
+// @desc Get a single item by ID
+package get
 
 import (
 	"fmt"

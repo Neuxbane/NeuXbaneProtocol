@@ -36,19 +36,31 @@ func BuildView(table *router.Table, path string) *Response {
 	if len(selfEntries) > 0 {
 		first := selfEntries[0]
 		methods := make([]string, 0, len(selfEntries))
+		schemas := make(map[string]any, len(selfEntries))
+		descriptions := make(map[string]string, len(selfEntries))
 		for _, e := range selfEntries {
-			if e.Route.Method != "" {
-				methods = append(methods, e.Route.Method)
+			if e.Route.Method == "" {
+				continue
+			}
+			methods = append(methods, e.Route.Method)
+			// The schema contract is keyed by method: each method on the same
+			// path carries its own request/response shape.
+			if e.Route.Shape != nil {
+				schemas[e.Route.Method] = e.Route.Shape
+			}
+			if e.Route.Description != "" {
+				descriptions[e.Route.Method] = e.Route.Description
 			}
 		}
 
 		resp.Self = &SelfView{
-			Handler:   string(first.Route.ID),
-			Methods:   methods,
-			Auth:      first.Route.Auth,
-			Scopes:    first.Route.Scopes,
-			RateLimit: first.Route.RateLimit,
-			Schema:    first.Route.Shape,
+			Handler:      string(first.Route.ID),
+			Methods:      methods,
+			Auth:         first.Route.Auth,
+			Scopes:       first.Route.Scopes,
+			RateLimit:    first.Route.RateLimit,
+			Schemas:      schemas,
+			Descriptions: descriptions,
 		}
 	}
 

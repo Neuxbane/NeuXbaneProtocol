@@ -52,6 +52,11 @@ func setupTestTable() *router.Table {
 			Method:    "GET",
 			Path:      "/auth/profile",
 			Auth:      "required",
+			Shape: abi.RequestResponseShape{
+				Responses: map[int]*abi.Schema{
+					200: {Type: "object"},
+				},
+			},
 		},
 	})
 	tbl.Store(&router.Entry{
@@ -61,6 +66,12 @@ func setupTestTable() *router.Table {
 			Method:    "PATCH",
 			Path:      "/auth/profile",
 			Auth:      "required",
+			Shape: abi.RequestResponseShape{
+				Request: &abi.Schema{Type: "object"},
+				Responses: map[int]*abi.Schema{
+					200: {Type: "object"},
+				},
+			},
 		},
 	})
 
@@ -134,6 +145,36 @@ func TestIntrospectJSON(t *testing.T) {
 	}
 	if !foundDynamic {
 		t.Errorf("expected dynamic child {id} under /auth")
+	}
+}
+
+func TestIntrospectSchemaPerMethod(t *testing.T) {
+	tbl := setupTestTable()
+	cfg := config.DefaultConfig().Introspect
+	cfg.Public = true
+	interceptor := introspect.NewInterceptor(cfg, "bld-test-schemas")
+
+	req := httptest.NewRequest("GET", "/auth/profile?nxp", nil)
+	rec := httptest.NewRecorder()
+	interceptor.Intercept(rec, req, tbl)
+
+	var resp introspect.Response
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal resp failed: %v", err)
+	}
+	if resp.Self == nil {
+		t.Fatalf("expected self view for /auth/profile")
+	}
+
+	// The schema contract is keyed by method: both GET and PATCH must be present.
+	if len(resp.Self.Schemas) != 2 {
+		t.Fatalf("expected 2 method schemas, got %d: %+v", len(resp.Self.Schemas), resp.Self.Schemas)
+	}
+	if _, ok := resp.Self.Schemas["GET"]; !ok {
+		t.Errorf("expected schema for GET")
+	}
+	if _, ok := resp.Self.Schemas["PATCH"]; !ok {
+		t.Errorf("expected schema for PATCH")
 	}
 }
 

@@ -1,6 +1,7 @@
+// @desc Sensor telemetry MQTT subscriber
 // @topic sensors/+/telemetry
 // @qos 1
-package sensors
+package mqtt
 
 import (
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/mqtt"

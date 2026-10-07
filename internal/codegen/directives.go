@@ -11,11 +11,11 @@ import (
 
 // Directives represents comment metadata annotations extracted from a handler file.
 type Directives struct {
-	Route       string
 	Transport   abi.Transport
 	Method      string
 	Auth        string
 	Scopes      []string
+	Guards      []string
 	RateLimit   *abi.RateLimitConfig
 	Stream      bool
 	Topic       string
@@ -23,12 +23,14 @@ type Directives struct {
 	Retain      bool
 	Group       string
 	Partitions  int
+	Description string
 }
 
 // ParseDirectives extracts @directives from the initial comment block of a Go file.
 func ParseDirectives(content string) *Directives {
 	d := &Directives{
 		Scopes: make([]string, 0),
+		Guards: make([]string, 0),
 	}
 
 	scanner := bufio.NewScanner(strings.NewReader(content))
@@ -56,10 +58,6 @@ func ParseDirectives(content string) *Directives {
 		args := parts[1:]
 
 		switch directive {
-		case "@route":
-			if len(args) > 0 {
-				d.Route = args[0]
-			}
 		case "@transport":
 			if len(args) > 0 {
 				tr := abi.Transport(strings.ToLower(args[0]))
@@ -77,6 +75,17 @@ func ParseDirectives(content string) *Directives {
 			}
 		case "@scope", "@scopes":
 			d.Scopes = append(d.Scopes, args...)
+		case "@guard", "@guards":
+			// Guard names are space- or comma-separated. A name may itself
+			// contain a slash (e.g. "user/admin") to reference a nested guard.
+			for _, arg := range args {
+				for _, g := range strings.Split(arg, ",") {
+					g = strings.TrimSpace(g)
+					if g != "" {
+						d.Guards = append(d.Guards, g)
+					}
+				}
+			}
 		case "@ratelimit":
 			if len(args) >= 2 {
 				rps, _ := strconv.Atoi(args[0])
@@ -102,6 +111,12 @@ func ParseDirectives(content string) *Directives {
 		case "@partitions":
 			if len(args) > 0 {
 				d.Partitions, _ = strconv.Atoi(args[0])
+			}
+		case "@desc", "@description":
+			// The description is free-form text: capture everything after the
+			// directive keyword, preserving internal spacing.
+			if rest := strings.TrimSpace(strings.TrimPrefix(comment, directive)); rest != "" {
+				d.Description = rest
 			}
 		}
 	}

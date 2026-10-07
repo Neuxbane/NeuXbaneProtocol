@@ -21,9 +21,23 @@ func HandleSchemaBundle(w http.ResponseWriter, r *http.Request, table *router.Ta
 	schemas := make(map[string]any)
 
 	for _, e := range entries {
-		if e.Route.Shape != nil {
-			schemas[string(e.Route.ID)] = e.Route.Shape
+		if e.Route.Shape == nil {
+			continue
 		}
+		// Marshal the shape to a generic map so we can attach route-level
+		// metadata (the description) alongside the request/response schemas.
+		raw, err := json.Marshal(e.Route.Shape)
+		if err != nil {
+			continue
+		}
+		def := make(map[string]any)
+		if err := json.Unmarshal(raw, &def); err != nil {
+			continue
+		}
+		if e.Route.Description != "" {
+			def["description"] = e.Route.Description
+		}
+		schemas[string(e.Route.ID)] = def
 	}
 
 	bundle := map[string]any{

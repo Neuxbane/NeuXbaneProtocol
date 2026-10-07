@@ -84,6 +84,32 @@ func TestValidateRequest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected valid request to pass, got: %v", err)
 	}
+
+	// 6. Route with Guard dependency
+	guardedRoute := &abi.Route{
+		ID:        "guarded.endpoint",
+		Transport: abi.TransportREST,
+		Method:    "GET",
+		Path:      "/guarded",
+		Guards:    []string{"auth"},
+	}
+
+	// Unauthenticated should fail guard check with 401
+	unauthGuardReq := abi.NewRequest(abi.TransportREST, "GET", "/guarded")
+	err = contract.ValidateRequest(guardedRoute, unauthGuardReq)
+	if err == nil || err.Code != contract.CodeRequestUnauthorized || err.HTTPStatusCode() != 401 {
+		t.Fatalf("expected 401 unauthorized on guard failure, got: %v", err)
+	}
+
+	// Authenticated request should pass guard check
+	authGuardReq := abi.NewRequest(abi.TransportREST, "GET", "/guarded")
+	authGuardReq.Identity = &abi.Identity{
+		Subject: "user_1",
+	}
+	err = contract.ValidateRequest(guardedRoute, authGuardReq)
+	if err != nil {
+		t.Fatalf("expected authenticated request to pass guard, got: %v", err)
+	}
 }
 
 func TestValidateResponse(t *testing.T) {

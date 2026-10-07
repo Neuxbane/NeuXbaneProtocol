@@ -1,4 +1,5 @@
-package define
+// @desc Framework welcome endpoint
+package get
 
 import (
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/rest"

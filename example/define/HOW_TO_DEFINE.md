@@ -19,21 +19,46 @@ You never see `net/http`, socket file descriptors, low-level chunk buffers, or r
 
 ## 2. Directory Tree Routing
 
-The directory structure under `define/` directly defines your routes:
+The directory structure under `define/` directly defines your routes.
+A route is a **method folder** containing a `handler.go`:
 
-- `define/index.go` maps to `GET /`
-- `define/auth/index.go` maps to `GET /auth` (never `/auth/index`)
-- `define/items/item/index.go` with `// @route /items/{id}` maps to `GET /items/{id}`
-- `define/items/create/index.go` with `// @method POST` maps to `POST /items/create`
+- `define/get/handler.go` maps to `GET /`
+- `define/agents/get/handler.go` maps to `GET /agents`
+- `define/agents/post/handler.go` maps to `POST /agents`
+- `define/agents/@id/get/handler.go` maps to `GET /agents/{id}`
+- `define/agents/@id/patch/handler.go` maps to `PATCH /agents/{id}`
+- `define/sources/@id/sync/post/handler.go` maps to `POST /sources/{id}/sync`
 
-Filename prefixes can also specify method and transport:
-- `get_`, `post_`, `put_`, `del_`, `patch_` -> REST HTTP verbs
-- `ws_` -> WebSocket
-- `grpc_` -> gRPC HTTP/2
-- `udp_` -> UDP datagram
-- `mqtt_` -> MQTT subscriber
-- `nats_` -> NATS subscriber
-- `kafka_` -> Kafka consumer
+Method folders: `get`, `post`, `put`, `patch`, `delete`, `ws`, `rtc`, `grpc`, `udp`, `mqtt`, `nats`, `kafka`.
+A `@name` folder becomes a dynamic path parameter `{name}`.
+
+### Guards
+
+`index.go` is a **guard implementation**, not a route. The folder name is the guard name:
+
+```go
+// define/auth/index.go
+package auth
+
+func Guard(ctx *rest.Ctx) error { /* ... */ }
+```
+
+Endpoints opt in with a directive in their handler file:
+
+```go
+// define/agents/@id/get/handler.go
+// @guard auth user/admin
+package get
+```
+
+### Descriptions
+
+Every endpoint should declare a description (MCP-style runtime metadata):
+
+```go
+// @desc List all agents
+package get
+```
 
 ---
 

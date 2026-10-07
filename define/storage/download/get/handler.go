@@ -1,4 +1,5 @@
-package download
+// @desc Download a stored file
+package get
 
 import (
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/errors"

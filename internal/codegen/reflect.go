@@ -52,6 +52,12 @@ func InspectHandlerSource(filePath, src string) (*HandlerInfo, error) {
 		}
 	}
 
+	// 1b. Resolve named struct references inside field schemas (e.g. []ModelInput)
+	// so nested objects carry their real properties instead of a bare object.
+	for _, s := range structSchemas {
+		resolveNamedRefs(s, structSchemas)
+	}
+
 	for _, decl := range node.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Name == nil {
@@ -70,15 +76,7 @@ func InspectHandlerSource(filePath, src string) (*HandlerInfo, error) {
 					info.InputSchema = structSchemas[info.InputType]
 				}
 				if info.InputSchema == nil {
-					// Detect payload/request struct
-					for sName, sSchema := range structSchemas {
-						if strings.Contains(strings.ToLower(sName), "payload") ||
-							strings.Contains(strings.ToLower(sName), "request") ||
-							strings.Contains(strings.ToLower(sName), "input") {
-							info.InputSchema = sSchema
-							break
-						}
-					}
+					info.InputSchema = pickInputSchema(structSchemas)
 				}
 
 				// Resolve result schema
@@ -211,8 +209,11 @@ func parseFieldAST(expr ast.Expr) *abi.Schema {
 			return &abi.Schema{Type: "number"}
 		case "bool":
 			return &abi.Schema{Type: "boolean"}
+		case "any", "interface{}":
+			return &abi.Schema{}
 		default:
-			return &abi.Schema{Type: "object"}
+			// Named type reference; resolved in a second pass.
+			return &abi.Schema{Type: "object", Ref: "#/" + t.Name}
 		}
 	case *ast.ArrayType:
 		itemSchema := parseFieldAST(t.Elt)
@@ -225,6 +226,82 @@ func parseFieldAST(expr ast.Expr) *abi.Schema {
 	default:
 		return &abi.Schema{Type: "object"}
 	}
+}
+
+// resolveNamedRefs walks a schema tree and replaces named type references
+// (recorded as $ref "#/TypeName") with the actual struct schema. Cycles are
+// broken by leaving the reference in place.
+func resolveNamedRefs(s *abi.Schema, defs map[string]*abi.Schema) {
+	resolveNamedRefsSeen(s, defs, make(map[string]bool))
+}
+
+func resolveNamedRefsSeen(s *abi.Schema, defs map[string]*abi.Schema, seen map[string]bool) {
+	if s == nil {
+		return
+	}
+	if s.Items != nil {
+		if name, ok := refName(s.Items.Ref); ok {
+			if target, found := defs[name]; found && !seen[name] {
+				seen[name] = true
+				s.Items = target
+				resolveNamedRefsSeen(target, defs, seen)
+				delete(seen, name)
+			}
+		} else {
+			resolveNamedRefsSeen(s.Items, defs, seen)
+		}
+	}
+	for _, prop := range s.Properties {
+		if name, ok := refName(prop.Ref); ok {
+			if target, found := defs[name]; found && !seen[name] {
+				seen[name] = true
+				*prop = *target
+				resolveNamedRefsSeen(prop, defs, seen)
+				delete(seen, name)
+			}
+			continue
+		}
+		resolveNamedRefsSeen(prop, defs, seen)
+	}
+}
+
+// refName extracts the type name from a "#/TypeName" reference.
+func refName(ref string) (string, bool) {
+	if strings.HasPrefix(ref, "#/") {
+		return strings.TrimPrefix(ref, "#/"), true
+	}
+	return "", false
+}
+
+// pickInputSchema deterministically selects the request payload struct from a
+// file's struct declarations. It prefers names containing "request" or
+// "payload" over "input", and breaks ties by choosing the shortest name so
+// the result is stable across map iteration order.
+func pickInputSchema(defs map[string]*abi.Schema) *abi.Schema {
+	best := ""
+	bestRank := 99
+	for name := range defs {
+		lower := strings.ToLower(name)
+		rank := 99
+		switch {
+		case strings.Contains(lower, "request"):
+			rank = 0
+		case strings.Contains(lower, "payload"):
+			rank = 1
+		case strings.Contains(lower, "input"):
+			rank = 2
+		}
+		if rank == 99 {
+			continue
+		}
+		if rank < bestRank || (rank == bestRank && (best == "" || len(name) < len(best))) {
+			best, bestRank = name, rank
+		}
+	}
+	if best == "" {
+		return nil
+	}
+	return defs[best]
 }
 
 func parseFuncSignature(fn *ast.FuncDecl) *HandlerInfo {

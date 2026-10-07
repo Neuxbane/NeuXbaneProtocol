@@ -1,5 +1,5 @@
-// @method POST
-package create
+// @desc Create a new item
+package post
 
 import (
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/errors"

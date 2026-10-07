@@ -89,7 +89,39 @@ func RenderHTML(view *Response) string {
       padding: 20px 24px;
     }
     .path-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
-    .path-title { font-size: 20px; font-weight: 700; font-family: var(--font-mono); }
+    .breadcrumbs {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 18px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      background: #0d131f;
+      padding: 6px 14px;
+      border-radius: 8px;
+      border: 1px solid #1f2937;
+    }
+    .breadcrumb-item {
+      color: #60a5fa;
+      text-decoration: none;
+      transition: color 0.15s ease;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .breadcrumb-item:hover {
+      background: #1e293b;
+      color: #93c5fd;
+      text-decoration: underline;
+    }
+    .breadcrumb-item.current {
+      color: #f3f4f6;
+      cursor: default;
+      text-decoration: none;
+    }
+    .breadcrumb-sep {
+      color: #6b7280;
+      user-select: none;
+    }
     .badge {
       font-size: 12px;
       font-weight: 700;
@@ -319,7 +351,7 @@ func RenderHTML(view *Response) string {
     <!-- Path Metadata Card -->
     <div class="card">
       <div class="path-row">
-        <span class="path-title">` + html.EscapeString(view.Path) + `</span>`)
+        ` + renderBreadcrumbsHTML(view.Path))
 
 	if view.Self != nil {
 		for _, m := range view.Self.Methods {
@@ -391,7 +423,7 @@ func RenderHTML(view *Response) string {
             <h3 style="margin-bottom:14px; font-size:16px;">Request Configuration</h3>
             
             <div style="display:flex; gap:10px; margin-bottom:14px;">
-              <select id="req-method" class="form-control" style="width:120px; font-weight:700; font-family:var(--font-mono);">`)
+              <select id="req-method" class="form-control" style="width:120px; font-weight:700; font-family:var(--font-mono);" onchange="buildFormFromSchema()">`)
 
 	// Populate methods
 	if view.Self != nil && len(view.Self.Methods) > 0 {
@@ -407,29 +439,6 @@ func RenderHTML(view *Response) string {
 	sb.WriteString(`</select>
               <input id="req-url" type="text" class="form-control" value="` + html.EscapeString(view.Path) + `" style="font-family:var(--font-mono);">
             </div>
-
-            <!-- Headers & Auth Section -->
-            <details style="margin-bottom:14px;">
-              <summary style="font-size:13px; font-weight:600; cursor:pointer; color:#93c5fd; margin-bottom:8px;">Headers &amp; Authentication</summary>
-              <div style="display:flex; flex-direction:column; gap:8px; padding-top:6px;">
-                <div class="form-group" style="margin-bottom:6px;">
-                  <label class="form-label">Authorization</label>
-                  <input id="header-auth" type="text" class="form-control" placeholder="Bearer &lt;token&gt;">
-                </div>
-                <div class="form-group" style="margin-bottom:6px;">
-                  <label class="form-label">Content-Type</label>
-                  <input id="header-content-type" type="text" class="form-control" value="application/json">
-                </div>
-              </div>
-            </details>
-
-            <!-- Query Parameters Section -->
-            <details style="margin-bottom:14px;">
-              <summary style="font-size:13px; font-weight:600; cursor:pointer; color:#93c5fd; margin-bottom:8px;">Query Parameters</summary>
-              <div id="query-params-container" style="display:flex; flex-direction:column; gap:6px; padding-top:6px;">
-              </div>
-              <button type="button" class="btn-add" style="margin-top:6px;" onclick="addQueryParamRow()">+ Add Query Parameter</button>
-            </details>
 
             <!-- Request Body Mode Switcher -->
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
@@ -550,10 +559,16 @@ func RenderHTML(view *Response) string {
       }
     }
 
-    // Resolve request schema from view
+    // Resolve request schema from view for the currently selected method.
+    // The schema contract is keyed by method: GET and POST on the same path
+    // carry different request/response shapes.
     function getRequestSchema() {
-      if (!nxpData || !nxpData.self || !nxpData.self.schema) return null;
-      const s = nxpData.self.schema;
+      if (!nxpData || !nxpData.self) return null;
+      const schemas = nxpData.self.schemas || {};
+      const methodEl = document.getElementById('req-method');
+      const method = methodEl ? methodEl.value : (nxpData.self.methods && nxpData.self.methods[0]);
+      const s = schemas[method];
+      if (!s) return null;
       return s.request || s.Request || s.in || s.In || s.body || s.Body || (s.type ? s : null);
     }
 
@@ -753,47 +768,21 @@ func RenderHTML(view *Response) string {
       buildFormFromSchema();
     }
 
-    // Query Params UI
-    function addQueryParamRow() {
-      const container = document.getElementById('query-params-container');
-      const row = document.createElement('div');
-      row.style.display = 'flex';
-      row.style.gap = '8px';
-      row.style.marginBottom = '6px';
-      row.innerHTML = '<input type="text" placeholder="Key" class="form-control q-key" style="width:40%;">' +
-                      '<input type="text" placeholder="Value" class="form-control q-val" style="flex:1;">' +
-                      '<button type="button" class="btn-icon" onclick="this.parentElement.remove()">✕</button>';
-      container.appendChild(row);
-    }
-
     // Send Request Handler
     async function sendRequest() {
       const btn = document.getElementById('btn-send');
       const method = document.getElementById('req-method').value;
-      let url = document.getElementById('req-url').value;
+      const url = document.getElementById('req-url').value;
 
-      // Append query parameters
-      const qRows = document.querySelectorAll('#query-params-container > div');
-      const qParams = new URLSearchParams();
-      qRows.forEach(r => {
-        const k = r.querySelector('.q-key').value.trim();
-        const v = r.querySelector('.q-val').value.trim();
-        if (k) qParams.append(k, v);
-      });
-      const qStr = qParams.toString();
-      if (qStr) {
-        url += (url.includes('?') ? '&' : '?') + qStr;
-      }
+      const headers = {
+        'Content-Type': 'application/json'
+      };
 
-      // Build Headers
-      const headers = {};
-      const auth = document.getElementById('header-auth').value.trim();
-      if (auth) headers['Authorization'] = auth;
-
-      const ct = document.getElementById('header-content-type').value.trim();
-      if (ct) headers['Content-Type'] = ct;
-
-      const options = { method, headers };
+      const options = {
+        method,
+        headers,
+        credentials: 'same-origin'
+      };
 
       // Attach body if method allows
       if (method !== 'GET' && method !== 'HEAD') {
@@ -889,5 +878,34 @@ func RenderHTML(view *Response) string {
 </body>
 </html>`)
 
+	return sb.String()
+}
+
+// renderBreadcrumbsHTML renders breadcrumb links for path hierarchy, e.g. /foo/bar/test -> [/] / [foo] / [bar] / [test]
+func renderBreadcrumbsHTML(path string) string {
+	clean := strings.TrimSpace(path)
+	if clean == "" || clean == "/" {
+		return `<nav class="breadcrumbs"><span class="breadcrumb-item current">/</span></nav>`
+	}
+
+	parts := strings.Split(strings.Trim(clean, "/"), "/")
+	var sb strings.Builder
+	sb.WriteString(`<nav class="breadcrumbs">`)
+	sb.WriteString(`<a href="/?nxp=html" class="breadcrumb-item" title="Root /">/</a>`)
+
+	accum := ""
+	for i, part := range parts {
+		if part == "" {
+			continue
+		}
+		accum += "/" + part
+		sb.WriteString(`<span class="breadcrumb-sep">/</span>`)
+		if i == len(parts)-1 {
+			sb.WriteString(fmt.Sprintf(`<span class="breadcrumb-item current">%s</span>`, html.EscapeString(part)))
+		} else {
+			sb.WriteString(fmt.Sprintf(`<a href="%s?nxp=html" class="breadcrumb-item">%s</a>`, html.EscapeString(accum), html.EscapeString(part)))
+		}
+	}
+	sb.WriteString(`</nav>`)
 	return sb.String()
 }

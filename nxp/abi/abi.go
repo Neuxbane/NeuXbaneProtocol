@@ -191,28 +191,32 @@ type RateLimitConfig struct {
 
 // Route represents a registered handler route within the system.
 type Route struct {
-	ID        HandlerID         `json:"id"`
-	Transport Transport         `json:"transport"`
-	Method    string            `json:"method"`
-	Path      string            `json:"path"`
-	Auth      string            `json:"auth,omitempty"` // "required", "optional", "public"
-	Scopes    []string          `json:"scopes,omitempty"`
-	RateLimit *RateLimitConfig  `json:"ratelimit,omitempty"`
-	Shape     Shape             `json:"shape"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	ID          HandlerID         `json:"id"`
+	Transport   Transport         `json:"transport"`
+	Method      string            `json:"method"`
+	Path        string            `json:"path"`
+	Description string            `json:"description,omitempty"`
+	Auth        string            `json:"auth,omitempty"` // "required", "optional", "public"
+	Scopes      []string          `json:"scopes,omitempty"`
+	Guards      []string          `json:"guards,omitempty"`
+	RateLimit   *RateLimitConfig  `json:"ratelimit,omitempty"`
+	Shape       Shape             `json:"shape"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 type routeWire struct {
-	ID        HandlerID         `json:"id"`
-	Transport Transport         `json:"transport"`
-	Method    string            `json:"method"`
-	Path      string            `json:"path"`
-	Auth      string            `json:"auth,omitempty"`
-	Scopes    []string          `json:"scopes,omitempty"`
-	RateLimit *RateLimitConfig  `json:"ratelimit,omitempty"`
-	ShapeKind ShapeKind         `json:"shape_kind"`
-	Shape     json.RawMessage   `json:"shape"`
-	Metadata  map[string]string `json:"metadata,omitempty"`
+	ID          HandlerID         `json:"id"`
+	Transport   Transport         `json:"transport"`
+	Method      string            `json:"method"`
+	Path        string            `json:"path"`
+	Description string            `json:"description,omitempty"`
+	Auth        string            `json:"auth,omitempty"`
+	Scopes      []string          `json:"scopes,omitempty"`
+	Guards      []string          `json:"guards,omitempty"`
+	RateLimit   *RateLimitConfig  `json:"ratelimit,omitempty"`
+	ShapeKind   ShapeKind         `json:"shape_kind"`
+	Shape       json.RawMessage   `json:"shape"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 // MarshalJSON provides stable polymorphic serialization for Route and its Shape.
@@ -229,16 +233,18 @@ func (r Route) MarshalJSON() ([]byte, error) {
 	}
 
 	w := routeWire{
-		ID:        r.ID,
-		Transport: r.Transport,
-		Method:    r.Method,
-		Path:      r.Path,
-		Auth:      r.Auth,
-		Scopes:    r.Scopes,
-		RateLimit: r.RateLimit,
-		ShapeKind: shapeKind,
-		Shape:     shapeRaw,
-		Metadata:  r.Metadata,
+		ID:          r.ID,
+		Transport:   r.Transport,
+		Method:      r.Method,
+		Path:        r.Path,
+		Description: r.Description,
+		Auth:        r.Auth,
+		Scopes:      r.Scopes,
+		Guards:      r.Guards,
+		RateLimit:   r.RateLimit,
+		ShapeKind:   shapeKind,
+		Shape:       shapeRaw,
+		Metadata:    r.Metadata,
 	}
 	return json.Marshal(w)
 }
@@ -254,8 +260,10 @@ func (r *Route) UnmarshalJSON(data []byte) error {
 	r.Transport = w.Transport
 	r.Method = w.Method
 	r.Path = w.Path
+	r.Description = w.Description
 	r.Auth = w.Auth
 	r.Scopes = w.Scopes
+	r.Guards = w.Guards
 	r.RateLimit = w.RateLimit
 	r.Metadata = w.Metadata
 

@@ -1,4 +1,5 @@
-package chat
+// @desc Chat room WebSocket stream
+package ws
 
 import (
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/ws"

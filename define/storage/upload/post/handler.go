@@ -1,5 +1,5 @@
-// @method POST
-package upload
+// @desc Upload a file to storage
+package post
 
 import (
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/errors"

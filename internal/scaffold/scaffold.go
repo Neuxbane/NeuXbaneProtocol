@@ -47,7 +47,7 @@ func EnsureAll(workDir, defineDir string) error {
 	return nil
 }
 
-// EnsureDefine ensures the define/ directory exists along with developer instructions and starter index.go.
+// EnsureDefine ensures the define/ directory exists along with developer instructions and a starter root handler.
 func EnsureDefine(defineDir string) error {
 	if defineDir == "" {
 		defineDir = "define"
@@ -72,19 +72,23 @@ func EnsureDefine(defineDir string) error {
 		_ = os.WriteFile(abiPath, []byte(abiDoc), 0644)
 	}
 
-	// 3. Ensure starter index.go if define/ is empty
-	entries, _ := os.ReadDir(defineDir)
-	hasGoFiles := false
-	for _, e := range entries {
-		if strings.HasSuffix(e.Name(), ".go") {
-			hasGoFiles = true
-			break
+	// 3. Ensure a starter root GET handler if define/ has no routes yet.
+	//    Convention: method folders hold handler.go (define/get/handler.go -> GET /).
+	hasRoutes := false
+	_ = filepath.WalkDir(defineDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
 		}
-	}
+		if !d.IsDir() && d.Name() == "handler.go" {
+			hasRoutes = true
+		}
+		return nil
+	})
 
-	if !hasGoFiles {
-		indexPath := filepath.Join(defineDir, "index.go")
-		_ = os.WriteFile(indexPath, []byte(starterIndexGo), 0644)
+	if !hasRoutes {
+		getDir := filepath.Join(defineDir, "get")
+		_ = os.MkdirAll(getDir, 0755)
+		_ = os.WriteFile(filepath.Join(getDir, "handler.go"), []byte(starterHandlerGo), 0644)
 	}
 
 	return nil
@@ -229,7 +233,7 @@ func parseModuleFromDir(dir string) string {
 	return ""
 }
 
-const starterIndexGo = `package define
+const starterHandlerGo = `package get
 
 import (
 	"abi/rest"
@@ -423,14 +427,16 @@ type RateLimitConfig struct {
 }
 
 type Route struct {
-	ID        HandlerID        ` + "`json:\"id\"`" + `
-	Transport Transport        ` + "`json:\"transport\"`" + `
-	Method    string           ` + "`json:\"method\"`" + `
-	Path      string           ` + "`json:\"path\"`" + `
-	Auth      string           ` + "`json:\"auth,omitempty\"`" + `
-	Scopes    []string         ` + "`json:\"scopes,omitempty\"`" + `
-	RateLimit *RateLimitConfig ` + "`json:\"ratelimit,omitempty\"`" + `
-	Shape     Shape            ` + "`json:\"shape,omitempty\"`" + `
+	ID          HandlerID        ` + "`json:\"id\"`" + `
+	Transport   Transport        ` + "`json:\"transport\"`" + `
+	Method      string           ` + "`json:\"method\"`" + `
+	Path        string           ` + "`json:\"path\"`" + `
+	Description string           ` + "`json:\"description,omitempty\"`" + `
+	Auth        string           ` + "`json:\"auth,omitempty\"`" + `
+	Scopes      []string         ` + "`json:\"scopes,omitempty\"`" + `
+	Guards      []string         ` + "`json:\"guards,omitempty\"`" + `
+	RateLimit   *RateLimitConfig ` + "`json:\"ratelimit,omitempty\"`" + `
+	Shape       Shape            ` + "`json:\"shape,omitempty\"`" + `
 }
 
 type Contract struct {
@@ -530,7 +536,7 @@ type Response struct {
 	Body      []byte              ` + "`json:\"body,omitempty\"`" + `
 	Metadata  map[string]string   ` + "`json:\"metadata,omitempty\"`" + `
 	Timestamp int64               ` + "`json:\"timestamp,omitempty\"`" + `
-	Error     error               ` + "`json:\"-\"`" + `
+	Error     *Error              ` + "`json:\"error,omitempty\"`" + `
 }
 
 func NewResponse(status int, body []byte) *Response {
@@ -654,15 +660,20 @@ func NewErrorResponse(err error) *Response {
 		return NewResponse(200, nil)
 	}
 	status := 500
-	if httpErr, ok := err.(interface{ HTTPStatusCode() int }); ok {
-		status = httpErr.HTTPStatusCode()
+	var nxpErr *Error
+	switch e := err.(type) {
+	case *Error:
+		nxpErr = e
+		status = e.HTTPStatusCode()
+	default:
+		if httpErr, ok := err.(interface{ HTTPStatusCode() int }); ok {
+			status = httpErr.HTTPStatusCode()
+		}
+		nxpErr = NewError("error", err.Error(), status)
 	}
-	body, _ := json.Marshal(map[string]any{
-		"error": err.Error(),
-		"code":  "error",
-	})
+	body, _ := json.Marshal(nxpErr)
 	resp := NewResponse(status, body)
-	resp.Error = err
+	resp.Error = nxpErr
 	resp.SetHeader("Content-Type", "application/json; charset=utf-8")
 	return resp
 }
@@ -1420,9 +1431,10 @@ func Handler(ctx *rest.Ctx) (Result, error)
 
 ### 2. Clean Local ABI Imports
 
-Handlers import the server-generated ` + "`abi`" + ` packages directly:
+Handlers import the server-generated ` + "`abi`" + ` packages directly.
+Routes live in method folders (` + "`define/get/handler.go`" + ` -> ` + "`GET /`" + `):
 ` + "```go" + `
-package define
+package get
 
 import (
     "abi/rest"
@@ -1483,21 +1495,46 @@ You never see ` + "`net/http`" + `, socket file descriptors, low-level chunk buf
 
 ## 2. Directory Tree Routing
 
-The directory structure under ` + "`define/`" + ` directly defines your routes:
+The directory structure under ` + "`define/`" + ` directly defines your routes.
+A route is a **method folder** containing a ` + "`handler.go`" + `:
 
-- ` + "`define/index.go`" + ` maps to ` + "`GET /`" + `
-- ` + "`define/auth/index.go`" + ` maps to ` + "`GET /auth`" + ` (never ` + "`/auth/index`" + `)
-- ` + "`define/items/item/index.go`" + ` with ` + "`// @route /items/{id}`" + ` maps to ` + "`GET /items/{id}`" + `
-- ` + "`define/items/create/index.go`" + ` with ` + "`// @method POST`" + ` maps to ` + "`POST /items/create`" + `
+- ` + "`define/get/handler.go`" + ` maps to ` + "`GET /`" + `
+- ` + "`define/agents/get/handler.go`" + ` maps to ` + "`GET /agents`" + `
+- ` + "`define/agents/post/handler.go`" + ` maps to ` + "`POST /agents`" + `
+- ` + "`define/agents/@id/get/handler.go`" + ` maps to ` + "`GET /agents/{id}`" + `
+- ` + "`define/agents/@id/patch/handler.go`" + ` maps to ` + "`PATCH /agents/{id}`" + `
+- ` + "`define/sources/@id/sync/post/handler.go`" + ` maps to ` + "`POST /sources/{id}/sync`" + `
 
-Filename prefixes can also specify method and transport:
-- ` + "`get_`, `post_`, `put_`, `del_`, `patch_`" + ` -> REST HTTP verbs
-- ` + "`ws_`" + ` -> WebSocket
-- ` + "`grpc_`" + ` -> gRPC HTTP/2
-- ` + "`udp_`" + ` -> UDP datagram
-- ` + "`mqtt_`" + ` -> MQTT subscriber
-- ` + "`nats_`" + ` -> NATS subscriber
-- ` + "`kafka_`" + ` -> Kafka consumer
+Method folders: ` + "`get`, `post`, `put`, `patch`, `delete`, `ws`, `grpc`, `udp`, `mqtt`, `nats`, `kafka`" + `.
+A ` + "`@name`" + ` folder becomes a dynamic path parameter ` + "`{name}`" + `.
+
+### Guards
+
+` + "`index.go`" + ` is a **guard implementation**, not a route. The folder name is the guard name:
+
+` + "```go" + `
+// define/auth/index.go
+package auth
+
+func Guard(ctx *rest.Ctx) error { /* ... */ }
+` + "```" + `
+
+Endpoints opt in with a directive in their handler file:
+
+` + "```go" + `
+// define/agents/@id/get/handler.go
+// @guard auth user/admin
+package get
+` + "```" + `
+
+### Descriptions
+
+Every endpoint should declare a description (MCP-style runtime metadata):
+
+` + "```go" + `
+// @desc List all agents
+package get
+` + "```" + `
 
 ---
 

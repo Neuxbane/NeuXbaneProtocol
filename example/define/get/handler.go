@@ -1,4 +1,4 @@
-package define
+package get
 
 import (
 	"abi/rest"

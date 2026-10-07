@@ -177,6 +177,7 @@ type Route struct {
 	Path      string           `json:"path"`
 	Auth      string           `json:"auth,omitempty"`
 	Scopes    []string         `json:"scopes,omitempty"`
+	Guards    []string         `json:"guards,omitempty"`
 	RateLimit *RateLimitConfig `json:"ratelimit,omitempty"`
 	Shape     Shape            `json:"shape,omitempty"`
 }
@@ -278,7 +279,7 @@ type Response struct {
 	Body      []byte              `json:"body,omitempty"`
 	Metadata  map[string]string   `json:"metadata,omitempty"`
 	Timestamp int64               `json:"timestamp,omitempty"`
-	Error     error               `json:"-"`
+	Error     *Error              `json:"error,omitempty"`
 }
 
 func NewResponse(status int, body []byte) *Response {
@@ -402,15 +403,20 @@ func NewErrorResponse(err error) *Response {
 		return NewResponse(200, nil)
 	}
 	status := 500
-	if httpErr, ok := err.(interface{ HTTPStatusCode() int }); ok {
-		status = httpErr.HTTPStatusCode()
+	var nxpErr *Error
+	switch e := err.(type) {
+	case *Error:
+		nxpErr = e
+		status = e.HTTPStatusCode()
+	default:
+		if httpErr, ok := err.(interface{ HTTPStatusCode() int }); ok {
+			status = httpErr.HTTPStatusCode()
+		}
+		nxpErr = NewError("error", err.Error(), status)
 	}
-	body, _ := json.Marshal(map[string]any{
-		"error": err.Error(),
-		"code":  "error",
-	})
+	body, _ := json.Marshal(nxpErr)
 	resp := NewResponse(status, body)
-	resp.Error = err
+	resp.Error = nxpErr
 	resp.SetHeader("Content-Type", "application/json; charset=utf-8")
 	return resp
 }

@@ -97,10 +97,22 @@ func (a *Adapter) Normalize(raw any) (*abi.Request, error) {
 		req.Body = bodyBytes
 	}
 
-	// Extract identity from Authorization Bearer token if present
+	// Extract identity from Authorization Bearer header or auth cookies if present
+	token := ""
 	authHeader := httpReq.Header.Get("Authorization")
 	if strings.HasPrefix(authHeader, "Bearer ") {
-		token := strings.TrimPrefix(authHeader, "Bearer ")
+		token = strings.TrimPrefix(authHeader, "Bearer ")
+	} else if cookie, err := httpReq.Cookie("xm_session"); err == nil && cookie.Value != "" {
+		token = cookie.Value
+	} else if cookie, err := httpReq.Cookie("token"); err == nil && cookie.Value != "" {
+		token = cookie.Value
+	} else if cookie, err := httpReq.Cookie("auth_token"); err == nil && cookie.Value != "" {
+		token = cookie.Value
+	} else if cookie, err := httpReq.Cookie("session"); err == nil && cookie.Value != "" {
+		token = cookie.Value
+	}
+
+	if token != "" {
 		req.Identity = &abi.Identity{
 			Subject: token,
 			Raw:     token,
@@ -222,6 +234,23 @@ func (a *Adapter) Render(w io.Writer, resp *abi.Response, ctx transport.RenderCt
 
 	if rw.Header().Get("Content-Type") == "" {
 		rw.Header().Set("Content-Type", "application/json; charset=utf-8")
+	}
+
+	// If response is successful and contains a "token" field, ensure auth cookies are set
+	if resp.Status >= 200 && resp.Status < 300 && len(resp.Body) > 0 && rw.Header().Get("Set-Cookie") == "" {
+		var tokenDetector struct {
+			Token string `json:"token"`
+		}
+		if err := json.Unmarshal(resp.Body, &tokenDetector); err == nil && tokenDetector.Token != "" {
+			cookie := &http.Cookie{
+				Name:     "xm_session",
+				Value:    tokenDetector.Token,
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			}
+			http.SetCookie(rw, cookie)
+		}
 	}
 
 	status := resp.Status

@@ -15,16 +15,26 @@ func TestComputeRoutePath(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"define/index.go", "/"},
-		{"define/auth/index.go", "/auth"},
+		{"define/get/handler.go", "/"},
+		{"define/auth/get/handler.go", "/auth"},
 		{"define/auth/login.go", "/auth/login"},
 		{"define/users/[id].go", "/users/{id}"},
-		{"define/users/[id]/tokens/index.go", "/users/{id}/tokens"},
+		{"define/users/[id]/tokens/get/handler.go", "/users/{id}/tokens"},
 		{"define/get_profile.go", "/profile"},
 		{"define/auth/post_login.go", "/auth/login"},
 		{"define/del_item.go", "/item"},
 		{"define/ws_chat.go", "/chat"},
 		{"define/mqtt_sensors.go", "/sensors"},
+		// Folder-routing convention: method folder + handler.go, or bare method file.
+		{"define/agents/get/handler.go", "/agents"},
+		{"define/agents/post/handler.go", "/agents"},
+		{"define/agents/@id/get/handler.go", "/agents/{id}"},
+		{"define/agents/@id/patch/handler.go", "/agents/{id}"},
+		{"define/agents/@id/delete/handler.go", "/agents/{id}"},
+		{"define/agents/@id/get.go", "/agents/{id}"},
+		{"define/chat/room/ws/handler.go", "/chat/room"},
+		{"define/sensors/telemetry/mqtt/handler.go", "/sensors/telemetry"},
+		{"define/storage/download/get/handler.go", "/storage/download"},
 	}
 
 	for _, tt := range tests {
@@ -37,15 +47,24 @@ func TestComputeRoutePath(t *testing.T) {
 
 func TestInferTransportAndMethod(t *testing.T) {
 	tests := []struct {
-		filename  string
-		wantTr    abi.Transport
-		wantMeth  string
+		path     string
+		wantTr   abi.Transport
+		wantMeth string
 	}{
+		// Method folder + handler.go
+		{"agents/get/handler.go", abi.TransportREST, "GET"},
+		{"agents/post/handler.go", abi.TransportREST, "POST"},
+		{"agents/@id/patch/handler.go", abi.TransportREST, "PATCH"},
+		{"agents/@id/delete/handler.go", abi.TransportREST, "DELETE"},
+		{"chat/room/ws/handler.go", abi.TransportWebSocket, "CONNECT"},
+		{"sensors/telemetry/mqtt/handler.go", abi.TransportMQTT, "SUB"},
+		// Bare method filename
+		{"agents/@id/get.go", abi.TransportREST, "GET"},
+		{"agents/@id/patch.go", abi.TransportREST, "PATCH"},
+		{"agents/@id/delete.go", abi.TransportREST, "DELETE"},
+		// Legacy prefix form
 		{"get_user.go", abi.TransportREST, "GET"},
 		{"post_login.go", abi.TransportREST, "POST"},
-		{"put_profile.go", abi.TransportREST, "PUT"},
-		{"del_order.go", abi.TransportREST, "DELETE"},
-		{"patch_settings.go", abi.TransportREST, "PATCH"},
 		{"ws_stream.go", abi.TransportWebSocket, "CONNECT"},
 		{"grpc_service.go", abi.TransportGRPC, "POST"},
 		{"udp_telemetry.go", abi.TransportUDP, "SEND"},
@@ -56,30 +75,31 @@ func TestInferTransportAndMethod(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tr, meth := codegen.InferTransportAndMethod(tt.filename)
+		tr, meth := codegen.InferTransportAndMethod(tt.path)
 		if tr != tt.wantTr || meth != tt.wantMeth {
-			t.Errorf("Infer(%q) = (%s, %s), want (%s, %s)", tt.filename, tr, meth, tt.wantTr, tt.wantMeth)
+			t.Errorf("Infer(%q) = (%s, %s), want (%s, %s)", tt.path, tr, meth, tt.wantTr, tt.wantMeth)
 		}
 	}
 }
 
 func TestParseDirectives(t *testing.T) {
 	source := `// Package auth handles authentication.
-// @route /api/v2/login
 // @transport rest
 // @method POST
 // @auth required
 // @scope admin users:write
+// @guard auth, user/admin
 // @ratelimit 50 100
 // @topic sensors/+/temp
 // @qos 1
 // @retain
+// @desc Authenticate a user and issue a session token.
 package auth
 `
 
 	d := codegen.ParseDirectives(source)
-	if d.Route != "/api/v2/login" {
-		t.Errorf("Route = %q, want /api/v2/login", d.Route)
+	if d.Description != "Authenticate a user and issue a session token." {
+		t.Errorf("Description = %q, want %q", d.Description, "Authenticate a user and issue a session token.")
 	}
 	if d.Transport != abi.TransportREST {
 		t.Errorf("Transport = %s, want rest", d.Transport)
@@ -92,6 +112,9 @@ package auth
 	}
 	if len(d.Scopes) != 2 || d.Scopes[0] != "admin" || d.Scopes[1] != "users:write" {
 		t.Errorf("Scopes = %v, want [admin, users:write]", d.Scopes)
+	}
+	if len(d.Guards) != 2 || d.Guards[0] != "auth" || d.Guards[1] != "user/admin" {
+		t.Errorf("Guards = %v, want [auth, user/admin]", d.Guards)
 	}
 	if d.RateLimit == nil || d.RateLimit.RPS != 50 || d.RateLimit.Burst != 100 {
 		t.Errorf("RateLimit = %+v, want {50, 100}", d.RateLimit)
@@ -133,6 +156,53 @@ func Handler(ctx *rest.Ctx) (Result, error) {
 	}
 }
 
+func TestInspectHandlerNestedStruct(t *testing.T) {
+	src := `package engines
+
+import "github.com/Neuxbane/NeuXbaneProtocol/nxp/rest"
+
+type ModelInput struct {
+	ModelID string ` + "`json:\"model_id\" validate:\"required\"`" + `
+	Name    string ` + "`json:\"name\"`" + `
+}
+
+type Request struct {
+	Name   string       ` + "`json:\"name\" validate:\"required\"`" + `
+	Models []ModelInput ` + "`json:\"models\"`" + `
+}
+
+func Handler(ctx *rest.Ctx) (any, error) {
+	return nil, nil
+}
+`
+
+	info, err := codegen.InspectHandlerSource("engines.go", src)
+	if err != nil {
+		t.Fatalf("InspectHandlerSource failed: %v", err)
+	}
+	if info == nil || info.InputSchema == nil {
+		t.Fatal("expected non-nil input schema")
+	}
+	// The heuristic must pick Request, not ModelInput.
+	if _, ok := info.InputSchema.Properties["models"]; !ok {
+		t.Fatalf("expected Request schema with 'models' property, got %+v", info.InputSchema.Properties)
+	}
+	if _, ok := info.InputSchema.Properties["model_id"]; ok {
+		t.Fatal("input schema was flattened to ModelInput instead of Request")
+	}
+	// Nested array items must carry the real struct properties.
+	items := info.InputSchema.Properties["models"].Items
+	if items == nil || items.Properties == nil {
+		t.Fatalf("expected resolved nested items schema, got %+v", items)
+	}
+	if _, ok := items.Properties["model_id"]; !ok {
+		t.Errorf("nested items missing model_id property: %+v", items.Properties)
+	}
+	if len(items.Required) != 1 || items.Required[0] != "model_id" {
+		t.Errorf("nested items required = %v, want [model_id]", items.Required)
+	}
+}
+
 func TestGenerateProject(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "codegen-test-*")
 	if err != nil {
@@ -144,8 +214,11 @@ func TestGenerateProject(t *testing.T) {
 	authDir := filepath.Join(defineDir, "auth")
 	_ = os.MkdirAll(authDir, 0755)
 
-	indexFile := filepath.Join(defineDir, "index.go")
-	indexCode := `package root
+	// Root GET handler lives in a method folder: define/get/handler.go.
+	rootGetDir := filepath.Join(defineDir, "get")
+	_ = os.MkdirAll(rootGetDir, 0755)
+	indexFile := filepath.Join(rootGetDir, "handler.go")
+	indexCode := `package get
 
 import "github.com/Neuxbane/NeuXbaneProtocol/nxp/rest"
 
@@ -155,8 +228,21 @@ func Handler(ctx *rest.Ctx) (string, error) {
 `
 	_ = os.WriteFile(indexFile, []byte(indexCode), 0644)
 
+	// Guard implementation: define/auth/index.go implements guard "auth".
+	guardFile := filepath.Join(authDir, "index.go")
+	guardCode := `package auth
+
+import "github.com/Neuxbane/NeuXbaneProtocol/nxp/rest"
+
+func Guard(ctx *rest.Ctx) error {
+	return nil
+}
+`
+	_ = os.WriteFile(guardFile, []byte(guardCode), 0644)
+
 	loginFile := filepath.Join(authDir, "post_login.go")
 	loginCode := `// @auth public
+// @guard auth
 package auth
 
 import "github.com/Neuxbane/NeuXbaneProtocol/nxp/rest"
@@ -194,6 +280,15 @@ func Handler(ctx *rest.Ctx) (string, error) {
 	}
 	if !strings.Contains(genStr, `"get.index"`) {
 		t.Errorf("generated code missing root route get.index")
+	}
+	if !strings.Contains(genStr, "GeneratedGuards = map[string]func(*abi.Request) error{") {
+		t.Errorf("generated code missing GeneratedGuards")
+	}
+	if !strings.Contains(genStr, `"guard.auth"`) {
+		t.Errorf("generated code missing guard guard.auth")
+	}
+	if !strings.Contains(genStr, `[]string{"guard.auth"}`) {
+		t.Errorf("generated code missing route guard wiring")
 	}
 
 	savedBuildID, err := codegen.ReadBuildIDFile(buildIDFile)

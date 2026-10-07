@@ -9,45 +9,99 @@ The core developer rule of `nxp`:
 
 ## 1. Directory Tree Routing
 
-Routes are derived directly from the filesystem layout under `define/`:
+Routes are derived directly from the filesystem layout under `define/`.
+A route is a **method folder** containing a `handler.go`:
 
 1. **Path Translation:**
    - Leading `define/` and trailing `.go` are removed.
-   - Trailing `index` is dropped: `define/auth/index.go` -> `/auth` (never `/auth/index`).
-   - Dynamic parameters `[param]` become `{param}`: `define/items/[id]/index.go` -> `/items/{id}`.
+   - The method folder (`get/`, `post/`, ...) and the `handler.go` filename never contribute to the path.
+   - Dynamic parameters `@param` (or `[param]`) become `{param}`: `define/items/@id/get/handler.go` -> `/items/{id}`.
    - Prepend leading `/`.
-2. **Filename Prefixes:**
-   - `get_`, `post_`, `put_`, `del_`, `patch_` -> REST HTTP verbs.
-   - `ws_` -> WebSocket.
-   - `grpc_` -> gRPC HTTP/2.
-   - `udp_` -> UDP datagram.
-   - `mqtt_` -> MQTT subscribe.
-   - `nats_` -> NATS subscribe.
-   - `kafka_` -> Kafka consumer group.
+2. **Method Folders:**
+   - `get`, `post`, `put`, `patch`, `delete` -> REST HTTP verbs.
+   - `ws` -> WebSocket.
+   - `rtc` -> WebRTC.
+   - `grpc` -> gRPC HTTP/2.
+   - `udp` -> UDP datagram.
+   - `mqtt` -> MQTT subscribe.
+   - `nats` -> NATS subscribe.
+   - `kafka` -> Kafka consumer group.
+
+Examples:
+
+```
+define/get/handler.go                    -> GET    /
+define/agents/get/handler.go             -> GET    /agents
+define/agents/post/handler.go            -> POST   /agents
+define/agents/@id/get/handler.go         -> GET    /agents/{id}
+define/agents/@id/patch/handler.go       -> PATCH  /agents/{id}
+define/sources/@id/sync/post/handler.go  -> POST   /sources/{id}/sync
+define/chat/room/ws/handler.go           -> WS     /chat/room
+define/sensors/telemetry/mqtt/handler.go -> MQTT   /sensors/telemetry
+```
+
+> **Why method folders?** Go allows only one `Handler`/`Request`/`Response` per package.
+> Putting each method in its own folder (`get/handler.go`, `post/handler.go`) keeps every
+> route in its own package, so a path can expose multiple methods without symbol collisions.
 
 ---
 
-## 2. Handler Directives
+## 2. Guards
 
-First-block doc comments can configure or override routing behaviors:
+`index.go` is a **guard implementation**, not a route. The folder name is the guard name:
+
+```go
+// define/auth/index.go
+package auth
+
+import (
+    "abi/errors"
+    "abi/rest"
+)
+
+func Guard(ctx *rest.Ctx) error {
+    id := ctx.Identity()
+    if id == nil || !id.IsAuthenticated() {
+        return errors.New("unauthorized", "authentication required", 401)
+    }
+    return nil
+}
+```
+
+Endpoints opt in with the `@guard` directive in their handler file:
+
+```go
+// define/agents/@id/get/handler.go
+// @guard auth user/admin
+package get
+```
+
+Guard names are the folder path relative to `define/` (e.g. `auth`, `user/admin`).
+
+---
+
+## 3. Handler Directives
+
+First-block doc comments can configure routing behaviors:
 
 ```go
 // Package profile provides member details.
-// @route /custom/path
+// @desc Get the caller profile
 // @transport rest
-// @method GET
 // @auth required
 // @scope profile:read
+// @guard auth
 // @ratelimit 100 200
-package profile
+package get
 ```
 
 ### Supported Directives:
-- `@route <path>`: Override filesystem path.
-- `@transport <name>`: `rest`, `websocket`, `grpc`, `webrtc`, `udp`, `mqtt`, `nats`, `kafka`.
-- `@method <verb>`: HTTP method or verb.
+- `@desc <text>` / `@description <text>`: Human-readable endpoint description (MCP-style runtime metadata).
+- `@transport <name>`: `rest`, `websocket`, `webrtc`, `grpc`, `udp`, `mqtt`, `nats`, `kafka`.
+- `@method <verb>`: HTTP method or verb (normally inferred from the method folder).
 - `@auth required|optional`: Enforce authentication.
 - `@scope <scope1> <scope2>`: Required permission scopes.
+- `@guard <name...>`: Guard implementations to run before the handler.
 - `@ratelimit <rps> <burst>`: Rate limiter settings.
 - `@topic <pattern>`: MQTT / PubSub topic (supports wildcards `+`, `#`).
 - `@qos <0|1|2>`: Quality of service level.
@@ -57,11 +111,11 @@ package profile
 
 ---
 
-## 3. Domains & Handler Contexts
+## 4. Domains & Handler Contexts
 
 `nxp` provides specialized, type-safe contexts under `nxp/*`:
 
-### 3.1 REST API Handler
+### 4.1 REST API Handler
 ```go
 package items
 
@@ -80,7 +134,7 @@ func Handler(ctx *rest.Ctx) (ItemResult, error) {
 }
 ```
 
-### 3.2 File Upload Handler (`nxp/files`)
+### 4.2 File Upload Handler (`nxp/files`)
 Supports streaming SHA256 calculation, MIME sniffing, virus/quarantine checks, and deduplication:
 ```go
 package upload
@@ -112,7 +166,7 @@ func Handler(ctx *files.UploadCtx) (files.UploadResult, error) {
 }
 ```
 
-### 3.3 File Download Handler (`nxp/files`)
+### 4.3 File Download Handler (`nxp/files`)
 Supports Range, ETag, and RFC 5987 Content-Disposition:
 ```go
 package download
@@ -129,7 +183,7 @@ func Handler(ctx *files.DownloadCtx) (files.DownloadResult, error) {
 }
 ```
 
-### 3.4 WebSocket Duplex Handler (`nxp/ws`)
+### 4.4 WebSocket Duplex Handler (`nxp/ws`)
 ```go
 package chat
 
@@ -147,7 +201,7 @@ func Handler(ctx *ws.Ctx) (ChatResult, error) {
 }
 ```
 
-### 3.5 WebRTC SFU Handler (`nxp/rtc`)
+### 4.5 WebRTC SFU Handler (`nxp/rtc`)
 ```go
 // @transport webrtc
 package meet
@@ -170,7 +224,7 @@ func Handler(ctx *rtc.SessionCtx) (MeetResult, error) {
 }
 ```
 
-### 3.6 MQTT Telemetry Handler (`nxp/mqtt`)
+### 4.6 MQTT Telemetry Handler (`nxp/mqtt`)
 ```go
 // @topic sensors/+/telemetry
 // @qos 1
