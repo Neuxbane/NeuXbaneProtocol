@@ -2,11 +2,13 @@
 package upload
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,4 +96,43 @@ func SanitizeFilename(name string) string {
 		return "unnamed_file"
 	}
 	return res
+}
+
+// ReceiveFromURL fetches a file from an HTTP/HTTPS URL and streams it to a temporary file.
+func ReceiveFromURL(ctx context.Context, fileURL string, maxQuota int64) (*ReceivedFile, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create url request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch url: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("fetch url returned status %d", resp.StatusCode)
+	}
+
+	filename := "file.bin"
+	if cd := resp.Header.Get("Content-Disposition"); cd != "" {
+		if strings.Contains(cd, "filename=") {
+			parts := strings.Split(cd, "filename=")
+			if len(parts) > 1 {
+				clean := strings.Trim(strings.Split(parts[1], ";")[0], "\" ")
+				if clean != "" {
+					filename = clean
+				}
+			}
+		}
+	} else {
+		if parsed, err := url.Parse(fileURL); err == nil {
+			base := filepath.Base(parsed.Path)
+			if base != "" && base != "/" && base != "." {
+				filename = base
+			}
+		}
+	}
+
+	return Receive(resp.Body, filename, maxQuota)
 }

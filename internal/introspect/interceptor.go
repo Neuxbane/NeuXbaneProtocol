@@ -2,10 +2,14 @@ package introspect
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
+	"strconv"
 	"strings"
 
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/router"
+	"github.com/Neuxbane/NeuXbaneProtocol/nxp/files"
 )
 
 // Interceptor handles ?nxp requests before route dispatch without calling workers.
@@ -35,7 +39,8 @@ func (i *Interceptor) SetBuildID(buildID string) {
 // Intercept inspects inbound HTTP requests and handles ?nxp requests.
 // Returns true if the request was an introspection request and handled.
 func (i *Interceptor) Intercept(w http.ResponseWriter, r *http.Request, table *router.Table) bool {
-	if !r.URL.Query().Has("nxp") {
+	isNXPPath := r.URL.Path == i.cfg.BundlePath || r.URL.Path == "/__nxp/schema" || r.URL.Path == "/__nxp/inspect" || strings.HasPrefix(r.URL.Path, "/__nxp/")
+	if !r.URL.Query().Has("nxp") && !isNXPPath {
 		return false
 	}
 
@@ -56,6 +61,11 @@ func (i *Interceptor) Intercept(w http.ResponseWriter, r *http.Request, table *r
 	// Check for schema bundle endpoint
 	if r.URL.Path == i.cfg.BundlePath || r.URL.Path == "/__nxp/schema" {
 		return HandleSchemaBundle(w, r, table, i.buildID)
+	}
+
+	// Check for inspect endpoint
+	if r.URL.Path == "/__nxp/inspect" || r.URL.Query().Get("nxp") == "inspect" {
+		return i.handleInspect(w, r)
 	}
 
 	nxpParam := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("nxp")))
@@ -169,3 +179,60 @@ func (i *Interceptor) writeContent(w http.ResponseWriter, format string, data []
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
 }
+
+func (i *Interceptor) handleInspect(w http.ResponseWriter, r *http.Request) bool {
+	source := r.URL.Query().Get("url")
+	if source == "" {
+		source = r.URL.Query().Get("file")
+	}
+	if source == "" {
+		source = r.URL.Query().Get("source")
+	}
+	if source == "" {
+		http.Error(w, `{"error":"missing file url or source parameter"}`, http.StatusBadRequest)
+		return true
+	}
+
+	if strings.HasPrefix(source, "/") && r.Host != "" {
+		if _, err := os.Stat(source); os.IsNotExist(err) {
+			proto := "http"
+			if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
+				proto = "https"
+			}
+			source = fmt.Sprintf("%s://%s%s", proto, r.Host, source)
+		}
+	}
+
+	fromStr := r.URL.Query().Get("from")
+	lenStr := r.URL.Query().Get("length")
+
+	var from, length int64
+	if fromStr != "" {
+		from, _ = strconv.ParseInt(fromStr, 10, 64)
+	}
+	if lenStr != "" {
+		length, _ = strconv.ParseInt(lenStr, 10, 64)
+	}
+	if length <= 0 {
+		length = 1024
+	}
+
+	res, err := files.Inspect(r.Context(), source, from, length, nil)
+	if err != nil {
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusBadRequest)
+		return true
+	}
+
+	if r.URL.Query().Get("format") == "raw" || r.Header.Get("Accept") == "application/octet-stream" {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("X-NXP-Total-Size", strconv.FormatInt(res.TotalSize, 10))
+		w.Header().Set("X-NXP-Read-Bytes", strconv.FormatInt(res.ReadBytes, 10))
+		_, _ = w.Write(res.Data)
+		return true
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_ = json.NewEncoder(w).Encode(res)
+	return true
+}
+

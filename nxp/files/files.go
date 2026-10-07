@@ -3,9 +3,14 @@ package files
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
+	"strconv"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/storage"
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/upload"
@@ -211,4 +216,155 @@ func (c *DownloadCtx) Param(key string) string {
 		return ""
 	}
 	return c.params[key]
+}
+
+// NewUploadCtxFromURL downloads a file from an HTTP/HTTPS URL and initializes an UploadCtx.
+func NewUploadCtxFromURL(ctx context.Context, fileURL string, fields map[string]string, backend storage.Backend) (*UploadCtx, error) {
+	rec, err := upload.ReceiveFromURL(ctx, fileURL, 0)
+	if err != nil {
+		return nil, err
+	}
+	return NewUploadCtx(rec, fields, backend)
+}
+
+// InspectResult contains byte-range inspection output and metadata.
+type InspectResult struct {
+	Source    string `json:"source"`
+	From      int64  `json:"from"`
+	Length    int64  `json:"length"`
+	ReadBytes int64  `json:"read_bytes"`
+	TotalSize int64  `json:"total_size"`
+	Data      []byte `json:"-"`
+	DataHex   string `json:"data_hex,omitempty"`
+	DataText  string `json:"data_text,omitempty"`
+	IsText    bool   `json:"is_text"`
+	EOF       bool   `json:"eof"`
+}
+
+// Inspect reads a byte slice from source (HTTP/HTTPS URL, NXP storage backend, or local path) between [from, from+length).
+func Inspect(ctx context.Context, source string, from, length int64, backend storage.Backend) (*InspectResult, error) {
+	if length <= 0 {
+		length = 1024
+	}
+	if from < 0 {
+		from = 0
+	}
+
+	res := &InspectResult{
+		Source: source,
+		From:   from,
+		Length: length,
+	}
+
+	if strings.HasPrefix(source, "http://") || strings.HasPrefix(source, "https://") {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, source, nil)
+		if err != nil {
+			return nil, fmt.Errorf("create inspect request: %w", err)
+		}
+		end := from + length - 1
+		req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", from, end))
+
+		client := http.DefaultClient
+		resp, err := client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("inspect http fetch: %w", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode == http.StatusPartialContent {
+			if cr := resp.Header.Get("Content-Range"); cr != "" {
+				parts := strings.Split(cr, "/")
+				if len(parts) == 2 && parts[1] != "*" {
+					if total, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+						res.TotalSize = total
+					}
+				}
+			}
+			buf, err := io.ReadAll(io.LimitReader(resp.Body, length))
+			if err != nil {
+				return nil, fmt.Errorf("read inspect response: %w", err)
+			}
+			res.Data = buf
+			res.ReadBytes = int64(len(buf))
+		} else if resp.StatusCode == http.StatusOK {
+			if resp.ContentLength > 0 {
+				res.TotalSize = resp.ContentLength
+			}
+			if from > 0 {
+				if _, err := io.CopyN(io.Discard, resp.Body, from); err != nil && err != io.EOF {
+					return nil, fmt.Errorf("skip to offset: %w", err)
+				}
+			}
+			buf, err := io.ReadAll(io.LimitReader(resp.Body, length))
+			if err != nil {
+				return nil, fmt.Errorf("read inspect body: %w", err)
+			}
+			res.Data = buf
+			res.ReadBytes = int64(len(buf))
+		} else {
+			return nil, fmt.Errorf("inspect http returned status %d", resp.StatusCode)
+		}
+
+		if res.TotalSize > 0 && res.From+res.ReadBytes >= res.TotalSize {
+			res.EOF = true
+		}
+	} else {
+		var rc io.ReadCloser
+		var total int64
+
+		if backend != nil {
+			if rRange, errRange := backend.GetRange(ctx, source, from, length); errRange == nil {
+				rc = rRange
+				if _, sz, errGet := backend.Get(ctx, source); errGet == nil {
+					total = sz
+				}
+			} else if rAll, sz, errGet := backend.Get(ctx, source); errGet == nil {
+				total = sz
+				if from > 0 {
+					_, _ = io.CopyN(io.Discard, rAll, from)
+				}
+				rc = rAll
+			}
+		}
+
+		if rc == nil {
+			f, errFile := os.Open(source)
+			if errFile != nil {
+				return nil, fmt.Errorf("source not found in storage or disk: %q", source)
+			}
+			fi, _ := f.Stat()
+			if fi != nil {
+				total = fi.Size()
+			}
+			if from > 0 {
+				if _, err := f.Seek(from, io.SeekStart); err != nil {
+					_ = f.Close()
+					return nil, fmt.Errorf("seek to offset %d: %w", from, err)
+				}
+			}
+			rc = f
+		}
+
+		defer rc.Close()
+		res.TotalSize = total
+		buf, err := io.ReadAll(io.LimitReader(rc, length))
+		if err != nil {
+			return nil, fmt.Errorf("read inspect data: %w", err)
+		}
+		res.Data = buf
+		res.ReadBytes = int64(len(buf))
+		if res.TotalSize > 0 && res.From+res.ReadBytes >= res.TotalSize {
+			res.EOF = true
+		}
+	}
+
+	if utf8.Valid(res.Data) {
+		res.IsText = true
+		res.DataText = string(res.Data)
+	} else {
+		res.IsText = false
+		res.DataHex = hex.EncodeToString(res.Data)
+	}
+
+	return res, nil
 }

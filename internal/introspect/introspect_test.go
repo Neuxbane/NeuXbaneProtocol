@@ -2,7 +2,9 @@ package introspect_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -237,3 +239,53 @@ func TestIntrospectQueryParameters(t *testing.T) {
 		t.Errorf("expected rich HTML tester page for ?nxp=html, got: %s", htmlBody[:min(200, len(htmlBody))])
 	}
 }
+
+func TestIntrospectInspect(t *testing.T) {
+	tbl := setupTestTable()
+	cfg := config.DefaultConfig().Introspect
+	cfg.Public = true
+	interceptor := introspect.NewInterceptor(cfg, "bld-test-inspect")
+
+	// Create a dummy temp file to inspect
+	tmpFile, err := os.CreateTemp("", "inspect-test-endpoint-*.txt")
+	if err != nil {
+		t.Fatalf("create temp: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	_, _ = tmpFile.WriteString("0123456789NXP_INSPECT_DATA_PAYLOAD")
+	tmpFile.Close()
+
+	// 1. Inspect JSON: GET /__nxp/inspect?url=...&from=10&length=11
+	reqURL := fmt.Sprintf("/__nxp/inspect?url=%s&from=10&length=11", tmpFile.Name())
+	reqJSON := httptest.NewRequest("GET", reqURL, nil)
+	recJSON := httptest.NewRecorder()
+	handled := interceptor.Intercept(recJSON, reqJSON, tbl)
+	if !handled {
+		t.Fatalf("expected /__nxp/inspect to be intercepted")
+	}
+
+	var jsonResult map[string]any
+	if err := json.Unmarshal(recJSON.Body.Bytes(), &jsonResult); err != nil {
+		t.Fatalf("unmarshal inspect json failed: %v", err)
+	}
+	if jsonResult["data_text"] != "NXP_INSPECT" {
+		t.Errorf("expected data_text NXP_INSPECT, got %v", jsonResult["data_text"])
+	}
+
+	// 2. Inspect Raw bytes: GET /__nxp/inspect?url=...&from=10&length=11&format=raw
+	reqRawURL := fmt.Sprintf("/__nxp/inspect?url=%s&from=10&length=11&format=raw", tmpFile.Name())
+	reqRaw := httptest.NewRequest("GET", reqRawURL, nil)
+	recRaw := httptest.NewRecorder()
+	handledRaw := interceptor.Intercept(recRaw, reqRaw, tbl)
+	if !handledRaw {
+		t.Fatalf("expected raw inspect to be intercepted")
+	}
+
+	if recRaw.Body.String() != "NXP_INSPECT" {
+		t.Errorf("expected raw string NXP_INSPECT, got %q", recRaw.Body.String())
+	}
+	if recRaw.Header().Get("Content-Type") != "application/octet-stream" {
+		t.Errorf("expected octet-stream header, got %s", recRaw.Header().Get("Content-Type"))
+	}
+}
+
