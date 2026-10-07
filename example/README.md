@@ -61,4 +61,4 @@ Start the server:
 - Test introspection: `curl http://localhost:8080/?nxp`
 - Hot reload: edit any file in `define/` and save. Changes take effect in <500ms without restarting the server!
 
-See `define/HOW_TO_DEFINE.md` and `define/ABI.md` for comprehensive guides.
+See `define/README.md` for the complete guide to writing handlers.

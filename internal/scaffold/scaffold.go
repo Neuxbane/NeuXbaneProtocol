@@ -60,19 +60,13 @@ func EnsureDefine(defineDir string) error {
 		}
 	}
 
-	// 1. Ensure HOW_TO_DEFINE.md
-	howToPath := filepath.Join(defineDir, "HOW_TO_DEFINE.md")
-	if _, err := os.Stat(howToPath); os.IsNotExist(err) {
-		_ = os.WriteFile(howToPath, []byte(howToDefineDoc), 0644)
+	// 1. Ensure a single consolidated guide: define/README.md
+	guidePath := filepath.Join(defineDir, "README.md")
+	if _, err := os.Stat(guidePath); os.IsNotExist(err) {
+		_ = os.WriteFile(guidePath, []byte(defineGuideDoc), 0644)
 	}
 
-	// 2. Ensure ABI.md
-	abiPath := filepath.Join(defineDir, "ABI.md")
-	if _, err := os.Stat(abiPath); os.IsNotExist(err) {
-		_ = os.WriteFile(abiPath, []byte(abiDoc), 0644)
-	}
-
-	// 3. Ensure a starter root GET handler if define/ has no routes yet.
+	// 2. Ensure a starter root GET handler if define/ has no routes yet.
 	//    Supports bare method files (define/get.go -> GET /) and method folders (define/get/handler.go -> GET /).
 	hasRoutes := false
 	_ = filepath.WalkDir(defineDir, func(path string, d os.DirEntry, err error) error {
@@ -1431,7 +1425,7 @@ func Handler(ctx *rest.Ctx) (Result, error)
 ### 2. Clean Local ABI Imports
 
 Handlers import the server-generated ` + "`abi`" + ` packages directly.
-Routes live in method folders (` + "`define/get/handler.go`" + ` -> ` + "`GET /`" + `):
+Routes live in method files (` + "`define/get.go`" + ` -> ` + "`GET /`" + `):
 ` + "```go" + `
 package get
 
@@ -1470,10 +1464,10 @@ Start the server:
 - Test introspection: ` + "`curl http://localhost:8080/?nxp`" + `
 - Hot reload: edit any file in ` + "`define/`" + ` and save. Changes take effect in <500ms without restarting the server!
 
-See ` + "`define/HOW_TO_DEFINE.md`" + ` and ` + "`define/ABI.md`" + ` for comprehensive guides.
+See ` + "`define/README.md`" + ` for the complete guide to writing handlers.
 `
 
-const howToDefineDoc = `# How to Write Handlers in nxp
+const defineGuideDoc = `# Writing Handlers in nxp
 
 Welcome to **nxp**! In this framework, you write **only business logic**.
 Routing, schema reflection, validation, transports, WebRTC SFU, hot reload, and introspection are handled automatically.
@@ -1495,17 +1489,21 @@ You never see ` + "`net/http`" + `, socket file descriptors, low-level chunk buf
 ## 2. Directory Tree Routing
 
 The directory structure under ` + "`define/`" + ` directly defines your routes.
-A route is a **method folder** containing a ` + "`handler.go`" + `:
+A route is a **method file** named after the HTTP method (or transport):
 
-- ` + "`define/get/handler.go`" + ` maps to ` + "`GET /`" + `
-- ` + "`define/agents/get/handler.go`" + ` maps to ` + "`GET /agents`" + `
-- ` + "`define/agents/post/handler.go`" + ` maps to ` + "`POST /agents`" + `
-- ` + "`define/agents/@id/get/handler.go`" + ` maps to ` + "`GET /agents/{id}`" + `
-- ` + "`define/agents/@id/patch/handler.go`" + ` maps to ` + "`PATCH /agents/{id}`" + `
-- ` + "`define/sources/@id/sync/post/handler.go`" + ` maps to ` + "`POST /sources/{id}/sync`" + `
+- ` + "`define/get.go`" + ` maps to ` + "`GET /`" + `
+- ` + "`define/agents/get.go`" + ` maps to ` + "`GET /agents`" + `
+- ` + "`define/agents/post.go`" + ` maps to ` + "`POST /agents`" + `
+- ` + "`define/agents/@id/get.go`" + ` maps to ` + "`GET /agents/{id}`" + `
+- ` + "`define/agents/@id/patch.go`" + ` maps to ` + "`PATCH /agents/{id}`" + `
+- ` + "`define/sources/@id/sync/post.go`" + ` maps to ` + "`POST /sources/{id}/sync`" + `
 
-Method folders: ` + "`get`, `post`, `put`, `patch`, `delete`, `ws`, `grpc`, `udp`, `mqtt`, `nats`, `kafka`" + `.
-A ` + "`@name`" + ` folder becomes a dynamic path parameter ` + "`{name}`" + `.
+Method file names: ` + "`get.go`, `post.go`, `put.go`, `patch.go`, `delete.go`, `ws.go`, `grpc.go`, `udp.go`, `mqtt.go`, `nats.go`, `kafka.go`" + `.
+A ` + "`@name`" + ` folder (or ` + "`[name]`" + `) becomes a dynamic path parameter ` + "`{name}`" + `.
+
+> Alternative form: a **method folder** containing a ` + "`handler.go`" + ` is equivalent
+> (` + "`define/agents/get/handler.go`" + ` -> ` + "`GET /agents`" + `). Prefer the bare method file.
+> A legacy prefix file (` + "`define/get_user.go`" + ` -> ` + "`GET /user`" + `) is also accepted.
 
 ### Guards
 
@@ -1545,7 +1543,13 @@ Struct tags are reflected into JSON Schema Draft 2020-12 at build time:
 - ` + "`json:\"field_name\"`" + `
 - ` + "`validate:\"required,min=1,max=100\"`" + `
 - ` + "`format:\"email\"`" + ` or ` + "`format:\"date-time\"`" + `
+- ` + "`enum:\"draft,published\"`" + `
 - ` + "`doc:\"Human-readable description\"`" + `
+
+Supported ` + "`validate`" + ` rules: ` + "`required`" + `, ` + "`min=N`" + ` / ` + "`max=N`" + ` (numeric),
+` + "`minlen=N`" + ` / ` + "`maxlen=N`" + ` (string length), ` + "`pattern=REGEX`" + `,
+` + "`enum=a|b|c`" + ` / ` + "`options=a|b|c`" + `, and the format shortcuts
+` + "`email`" + `, ` + "`uuid`" + `, ` + "`uri`" + `, ` + "`url`" + `, ` + "`date-time`" + `.
 
 Ingress validation runs in the Mother process before your handler is ever called.
 If a request fails validation, a 400 error is returned immediately and your worker is not invoked.
@@ -1582,15 +1586,17 @@ Import from ` + "`abi/*`" + ` or unified ` + "`abi`" + `:
    ` + "```go" + `
    import "abi/ws"
 
-   func Handler(ctx *ws.Ctx) error
+   func Handler(ctx *ws.Ctx) (Result, error)
    ` + "```" + `
+   ` + "`ws.Ctx`" + ` exposes ` + "`ctx.Request()`" + ` plus the embedded ` + "`context.Context`" + `.
 
 4. **WebRTC SFU (abi/rtc):**
    ` + "```go" + `
    import "abi/rtc"
 
-   func Handler(ctx *rtc.SessionCtx) error
+   func Handler(ctx *rtc.SessionCtx) (Result, error)
    ` + "```" + `
+   ` + "`rtc.SessionCtx`" + ` exposes ` + "`ctx.Request()`" + ` plus the embedded ` + "`context.Context`" + `.
 
 5. **MQTT Pub/Sub (abi/mqtt):**
    ` + "```go" + `
@@ -1598,6 +1604,7 @@ Import from ` + "`abi/*`" + ` or unified ` + "`abi`" + `:
 
    func Handler(ctx *mqtt.Ctx[InputEvent, OutputEvent]) (OutputEvent, error)
    ` + "```" + `
+   ` + "`mqtt.Ctx[In, Out]`" + ` exposes the ` + "`Payload In`" + ` field, ` + "`ctx.Request()`" + `, and ` + "`ctx.Topic()`" + `.
 
 ---
 
@@ -1650,13 +1657,14 @@ func Handler(ctx *rest.Ctx) (files.DownloadResult, error) {
     }, nil
 }
 ` + "```" + `
-`
 
-const abiDoc = `# Application Binary Interface (abi) Reference
+---
+
+## 6. The abi Package Reference
 
 The ` + "`abi`" + ` package provides the frozen contract between your handlers and the **nxp** runtime engine.
 
-## Unified Imports
+### Unified Imports
 
 You can import domain-specific packages:
 ` + "```go" + `
