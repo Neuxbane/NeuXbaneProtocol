@@ -1,3 +1,4 @@
+// @guard
 // @desc Get a single item by ID
 package get
 

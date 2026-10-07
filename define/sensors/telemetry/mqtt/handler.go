@@ -1,3 +1,4 @@
+// @guard
 // @desc Sensor telemetry MQTT subscriber
 // @topic sensors/+/telemetry
 // @qos 1

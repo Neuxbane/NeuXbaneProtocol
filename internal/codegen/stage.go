@@ -78,12 +78,23 @@ func StageDefineTree(defineDir, stageDir string) (map[string]string, error) {
 
 // sanitizeStagePath rewrites each path segment of a relative define path so it
 // is a valid Go import path component. "@param" becomes "_param".
+// If the file is a bare method name (e.g. get.go, post.go), it is staged into a
+// method folder (e.g. get/handler.go) so that multiple HTTP methods for the same
+// route live in separate packages without symbol collisions.
 func sanitizeStagePath(rel string) string {
 	rel = filepath.ToSlash(rel)
 	segments := strings.Split(rel, "/")
 	for i, seg := range segments {
+		last := i == len(segments)-1
 		if strings.HasPrefix(seg, "@") && len(seg) > 1 {
 			segments[i] = "_" + seg[1:]
+		}
+		if last && strings.HasSuffix(seg, ".go") && seg != "handler.go" && seg != "index.go" {
+			base := strings.TrimSuffix(seg, ".go")
+			if isMethodSegment(base) {
+				segments[i] = base
+				segments = append(segments, "handler.go")
+			}
 		}
 	}
 	return filepath.Join(segments...)

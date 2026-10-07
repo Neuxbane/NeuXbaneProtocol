@@ -1,3 +1,4 @@
+// @guard
 package get
 
 import (

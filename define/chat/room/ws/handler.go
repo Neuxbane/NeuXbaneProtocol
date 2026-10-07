@@ -1,3 +1,4 @@
+// @guard
 // @desc Chat room WebSocket stream
 package ws
 

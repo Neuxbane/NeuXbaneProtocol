@@ -1,6 +1,7 @@
 package codegen
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -258,6 +259,15 @@ func WalkDefineTree(defineDir string) ([]FileRoute, error) {
 		rel, _ := filepath.Rel(defineDir, path)
 		directives := ParseDirectives(content)
 
+		if !directives.HasGuardDirective {
+			return fmt.Errorf("route %s: missing required @guard directive (use '@guard <name>', '@guard <g1> <g2>', or '@guard' for none)", rel)
+		}
+
+		resolvedGuards, err := resolveGuards(directives.Guards, guardsByName)
+		if err != nil {
+			return fmt.Errorf("route %s: %w", rel, err)
+		}
+
 		inferredTransport, inferredMethod := InferTransportAndMethod(rel)
 
 		routePath := ComputeRoutePath("define/" + rel)
@@ -284,7 +294,7 @@ func WalkDefineTree(defineDir string) ([]FileRoute, error) {
 			Transport:   transport,
 			Directives:  directives,
 			Content:     content,
-			Guards:      resolveGuards(directives.Guards, guardsByName),
+			Guards:      resolvedGuards,
 		})
 
 		return nil
@@ -294,21 +304,40 @@ func WalkDefineTree(defineDir string) ([]FileRoute, error) {
 }
 
 // resolveGuards maps guard names declared via @guard to their guard handler IDs.
-// Unknown guard names are passed through unchanged so the generated code can
-// still reference them (and fail loudly at build time if missing).
-func resolveGuards(names []string, guardsByName map[string]string) []string {
+// Returns an error if any declared guard does not match an existing index.go guard.
+func resolveGuards(names []string, guardsByName map[string]string) ([]string, error) {
 	if len(names) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]string, 0, len(names))
 	for _, n := range names {
+		if n == "none" || n == "public" {
+			continue
+		}
 		if id, ok := guardsByName[n]; ok {
 			out = append(out, id)
-		} else {
-			out = append(out, "guard."+strings.ReplaceAll(n, "/", "."))
+			continue
 		}
+		sanitized := strings.ReplaceAll(n, "@", "_")
+		if id, ok := guardsByName[sanitized]; ok {
+			out = append(out, id)
+			continue
+		}
+		if strings.HasPrefix(n, "guard.") {
+			trimmed := strings.TrimPrefix(n, "guard.")
+			trimmedPath := strings.ReplaceAll(trimmed, ".", "/")
+			if id, ok := guardsByName[trimmedPath]; ok {
+				out = append(out, id)
+				continue
+			}
+			if id, ok := guardsByName[trimmed]; ok {
+				out = append(out, id)
+				continue
+			}
+		}
+		return nil, fmt.Errorf("unknown guard %q (no matching index.go found in define/%s)", n, n)
 	}
-	return out
+	return out, nil
 }
 
 // guardName derives a guard's logical name from its folder path relative to

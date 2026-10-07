@@ -218,7 +218,8 @@ func TestGenerateProject(t *testing.T) {
 	rootGetDir := filepath.Join(defineDir, "get")
 	_ = os.MkdirAll(rootGetDir, 0755)
 	indexFile := filepath.Join(rootGetDir, "handler.go")
-	indexCode := `package get
+	indexCode := `// @guard
+package get
 
 import "github.com/Neuxbane/NeuXbaneProtocol/nxp/rest"
 
@@ -296,3 +297,90 @@ func Handler(ctx *rest.Ctx) (string, error) {
 		t.Errorf("saved build ID %q doesn't match %q", savedBuildID, buildID)
 	}
 }
+
+func TestGuardRestrictions(t *testing.T) {
+	// 1. Missing @guard should fail
+	t.Run("MissingGuardFails", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "guard-test-missing-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		_ = os.WriteFile(filepath.Join(tmpDir, "get.go"), []byte("package get\n"), 0644)
+		_, err = codegen.WalkDefineTree(tmpDir)
+		if err == nil {
+			t.Fatal("expected error for missing @guard, got nil")
+		}
+		if !strings.Contains(err.Error(), "missing required @guard directive") {
+			t.Fatalf("expected missing required @guard directive error, got: %v", err)
+		}
+	})
+
+	// 2. Bare @guard for none should succeed
+	t.Run("BareGuardNoneSucceeds", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "guard-test-none-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		_ = os.WriteFile(filepath.Join(tmpDir, "get.go"), []byte("// @guard\npackage get\n"), 0644)
+		routes, err := codegen.WalkDefineTree(tmpDir)
+		if err != nil {
+			t.Fatalf("expected success for bare @guard, got: %v", err)
+		}
+		if len(routes) != 1 || len(routes[0].Guards) != 0 {
+			t.Fatalf("expected 1 route with 0 guards, got: %+v", routes)
+		}
+	})
+
+	// 3. Unknown guard should fail
+	t.Run("UnknownGuardFails", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "guard-test-unknown-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		_ = os.WriteFile(filepath.Join(tmpDir, "get.go"), []byte("// @guard nonexistent\npackage get\n"), 0644)
+		_, err = codegen.WalkDefineTree(tmpDir)
+		if err == nil {
+			t.Fatal("expected error for unknown guard, got nil")
+		}
+		if !strings.Contains(err.Error(), "unknown guard \"nonexistent\"") {
+			t.Fatalf("expected unknown guard error, got: %v", err)
+		}
+	})
+
+	// 4. Multiple guards (like @guard account/auth account/admin) should resolve
+	t.Run("MultipleGuardsResolve", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "guard-test-multi-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		accountAuthDir := filepath.Join(tmpDir, "account", "auth")
+		accountAdminDir := filepath.Join(tmpDir, "account", "admin")
+		_ = os.MkdirAll(accountAuthDir, 0755)
+		_ = os.MkdirAll(accountAdminDir, 0755)
+
+		_ = os.WriteFile(filepath.Join(accountAuthDir, "index.go"), []byte("package auth\n"), 0644)
+		_ = os.WriteFile(filepath.Join(accountAdminDir, "index.go"), []byte("package admin\n"), 0644)
+
+		_ = os.WriteFile(filepath.Join(tmpDir, "get.go"), []byte("// @guard account/auth account/admin\npackage get\n"), 0644)
+		routes, err := codegen.WalkDefineTree(tmpDir)
+		if err != nil {
+			t.Fatalf("expected success, got error: %v", err)
+		}
+		if len(routes) != 1 {
+			t.Fatalf("expected 1 route, got %d", len(routes))
+		}
+		expectedGuards := []string{"guard.account.auth", "guard.account.admin"}
+		if len(routes[0].Guards) != 2 || routes[0].Guards[0] != expectedGuards[0] || routes[0].Guards[1] != expectedGuards[1] {
+			t.Fatalf("expected guards %v, got %v", expectedGuards, routes[0].Guards)
+		}
+	})
+}
+

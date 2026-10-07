@@ -1,3 +1,4 @@
+// @guard
 // @desc Meeting room WebRTC session
 // @transport webrtc
 package rtc

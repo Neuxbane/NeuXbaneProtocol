@@ -11,19 +11,20 @@ import (
 
 // Directives represents comment metadata annotations extracted from a handler file.
 type Directives struct {
-	Transport   abi.Transport
-	Method      string
-	Auth        string
-	Scopes      []string
-	Guards      []string
-	RateLimit   *abi.RateLimitConfig
-	Stream      bool
-	Topic       string
-	QoS         int
-	Retain      bool
-	Group       string
-	Partitions  int
-	Description string
+	Transport         abi.Transport
+	Method            string
+	Auth              string
+	Scopes            []string
+	Guards            []string
+	HasGuardDirective bool
+	RateLimit         *abi.RateLimitConfig
+	Stream            bool
+	Topic             string
+	QoS               int
+	Retain            bool
+	Group             string
+	Partitions        int
+	Description       string
 }
 
 // ParseDirectives extracts @directives from the initial comment block of a Go file.
@@ -76,12 +77,14 @@ func ParseDirectives(content string) *Directives {
 		case "@scope", "@scopes":
 			d.Scopes = append(d.Scopes, args...)
 		case "@guard", "@guards":
+			d.HasGuardDirective = true
 			// Guard names are space- or comma-separated. A name may itself
 			// contain a slash (e.g. "user/admin") to reference a nested guard.
+			// Bare "@guard" (no args) or "@guard none" indicates no guards (public).
 			for _, arg := range args {
 				for _, g := range strings.Split(arg, ",") {
 					g = strings.TrimSpace(g)
-					if g != "" {
+					if g != "" && g != "none" {
 						d.Guards = append(d.Guards, g)
 					}
 				}

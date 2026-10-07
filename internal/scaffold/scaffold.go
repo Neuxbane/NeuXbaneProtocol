@@ -73,22 +73,20 @@ func EnsureDefine(defineDir string) error {
 	}
 
 	// 3. Ensure a starter root GET handler if define/ has no routes yet.
-	//    Convention: method folders hold handler.go (define/get/handler.go -> GET /).
+	//    Supports bare method files (define/get.go -> GET /) and method folders (define/get/handler.go -> GET /).
 	hasRoutes := false
 	_ = filepath.WalkDir(defineDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
-		if !d.IsDir() && d.Name() == "handler.go" {
+		if !d.IsDir() && strings.HasSuffix(d.Name(), ".go") && d.Name() != "index.go" {
 			hasRoutes = true
 		}
 		return nil
 	})
 
 	if !hasRoutes {
-		getDir := filepath.Join(defineDir, "get")
-		_ = os.MkdirAll(getDir, 0755)
-		_ = os.WriteFile(filepath.Join(getDir, "handler.go"), []byte(starterHandlerGo), 0644)
+		_ = os.WriteFile(filepath.Join(defineDir, "get.go"), []byte(starterHandlerGo), 0644)
 	}
 
 	return nil
@@ -233,7 +231,8 @@ func parseModuleFromDir(dir string) string {
 	return ""
 }
 
-const starterHandlerGo = `package get
+const starterHandlerGo = `// @guard
+package get
 
 import (
 	"abi/rest"
@@ -1519,10 +1518,12 @@ package auth
 func Guard(ctx *rest.Ctx) error { /* ... */ }
 ` + "```" + `
 
-Endpoints opt in with a directive in their handler file:
+Endpoints MUST explicitly declare a ` + "`// @guard`" + ` directive (omitting it fails compilation):
+- Specific guards: ` + "`// @guard auth`" + ` or multiple ` + "`// @guard account/auth account/admin`" + `
+- Unauthenticated (none): ` + "`// @guard`" + ` or ` + "`// @guard none`" + `
 
 ` + "```go" + `
-// define/agents/@id/get/handler.go
+// define/agents/@id/get.go
 // @guard auth user/admin
 package get
 ` + "```" + `
