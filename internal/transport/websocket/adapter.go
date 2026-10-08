@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -223,7 +224,7 @@ func (a *Adapter) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
-	isStream := entry.Route.Shape != nil && entry.Route.Shape.ShapeKind() == abi.ShapeKindStream
+	isStream := entry.Route.Shape != nil && (entry.Route.Shape.ShapeKind() == abi.ShapeKindStream || strings.HasSuffix(string(entry.Route.ID), ".stream") || strings.Contains(entry.Route.Path, "stream"))
 	clientInChan := make(chan []byte, 64)
 
 	sink := &wsStreamSink{

@@ -434,6 +434,132 @@ type Route struct {
 	Metadata    map[string]string ` + "`json:\"metadata,omitempty\"`" + `
 }
 
+type routeWire struct {
+	ID          HandlerID         ` + "`json:\"id\"`" + `
+	Transport   Transport         ` + "`json:\"transport\"`" + `
+	Method      string            ` + "`json:\"method\"`" + `
+	Path        string            ` + "`json:\"path\"`" + `
+	Description string            ` + "`json:\"description,omitempty\"`" + `
+	Auth        string            ` + "`json:\"auth,omitempty\"`" + `
+	Scopes      []string          ` + "`json:\"scopes,omitempty\"`" + `
+	Guards      []string          ` + "`json:\"guards,omitempty\"`" + `
+	RateLimit   *RateLimitConfig  ` + "`json:\"ratelimit,omitempty\"`" + `
+	ShapeKind   ShapeKind         ` + "`json:\"shape_kind\"`" + `
+	Shape       json.RawMessage   ` + "`json:\"shape\"`" + `
+	Metadata    map[string]string ` + "`json:\"metadata,omitempty\"`" + `
+}
+
+func (r Route) MarshalJSON() ([]byte, error) {
+	var shapeRaw []byte
+	var shapeKind ShapeKind
+	if r.Shape != nil {
+		shapeKind = r.Shape.ShapeKind()
+		var err error
+		shapeRaw, err = json.Marshal(r.Shape)
+		if err != nil {
+			return nil, fmt.Errorf("marshal shape: %w", err)
+		}
+	}
+
+	w := routeWire{
+		ID:          r.ID,
+		Transport:   r.Transport,
+		Method:      r.Method,
+		Path:        r.Path,
+		Description: r.Description,
+		Auth:        r.Auth,
+		Scopes:      r.Scopes,
+		Guards:      r.Guards,
+		RateLimit:   r.RateLimit,
+		ShapeKind:   shapeKind,
+		Shape:       shapeRaw,
+		Metadata:    r.Metadata,
+	}
+	return json.Marshal(w)
+}
+
+func (r *Route) UnmarshalJSON(data []byte) error {
+	var w routeWire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return err
+	}
+
+	r.ID = w.ID
+	r.Transport = w.Transport
+	r.Method = w.Method
+	r.Path = w.Path
+	r.Description = w.Description
+	r.Auth = w.Auth
+	r.Scopes = w.Scopes
+	r.Guards = w.Guards
+	r.RateLimit = w.RateLimit
+	r.Metadata = w.Metadata
+
+	if len(w.Shape) > 0 {
+		var shape Shape
+		switch w.ShapeKind {
+		case ShapeKindRequestResponse:
+			var s RequestResponseShape
+			if err := json.Unmarshal(w.Shape, &s); err != nil {
+				return err
+			}
+			shape = s
+		case ShapeKindFrames:
+			var s FramesShape
+			if err := json.Unmarshal(w.Shape, &s); err != nil {
+				return err
+			}
+			shape = s
+		case ShapeKindDatagram:
+			var s DatagramShape
+			if err := json.Unmarshal(w.Shape, &s); err != nil {
+				return err
+			}
+			shape = s
+		case ShapeKindPubSub:
+			var s PubSubShape
+			if err := json.Unmarshal(w.Shape, &s); err != nil {
+				return err
+			}
+			shape = s
+		case ShapeKindStream:
+			var s StreamShape
+			if err := json.Unmarshal(w.Shape, &s); err != nil {
+				return err
+			}
+			shape = s
+		default:
+			var probe map[string]any
+			if err := json.Unmarshal(w.Shape, &probe); err == nil {
+				if _, ok := probe["request"]; ok {
+					var s RequestResponseShape
+					_ = json.Unmarshal(w.Shape, &s)
+					shape = s
+				} else if _, ok := probe["response"]; ok {
+					var s DatagramShape
+					_ = json.Unmarshal(w.Shape, &s)
+					shape = s
+				} else if _, ok := probe["topics"]; ok {
+					var s PubSubShape
+					_ = json.Unmarshal(w.Shape, &s)
+					shape = s
+				} else if _, ok := probe["consumer_group"]; ok {
+					var s StreamShape
+					_ = json.Unmarshal(w.Shape, &s)
+					shape = s
+				} else {
+					var s FramesShape
+					_ = json.Unmarshal(w.Shape, &s)
+					shape = s
+				}
+			}
+		}
+		r.Shape = shape
+	}
+
+	return nil
+}
+
 type Contract struct {
 	ABIVersion string  ` + "`json:\"abi_version\"`" + `
 	BuildID    string  ` + "`json:\"build_id\"`" + `
