@@ -25,6 +25,11 @@ type Directives struct {
 	Group             string
 	Partitions        int
 	Description       string
+
+	// StreamContract holds the declarative poll contract for a live stream
+	// route (see @stream). It is emitted into the route metadata so generic
+	// consumers can drive the stream without endpoint-specific code.
+	StreamContract map[string]string
 }
 
 // ParseDirectives extracts @directives from the initial comment block of a Go file.
@@ -97,6 +102,32 @@ func ParseDirectives(content string) *Directives {
 			}
 		case "@stream":
 			d.Stream = true
+			// A stream route may declare a declarative poll contract as
+			// key=value pairs, e.g.:
+			//
+			//   // @stream action=poll cursor=offset messages=updates text=message.text id=update_id
+			//
+			// The contract is transport-agnostic: it tells a generic consumer
+			// how to build a poll request, where to find the message list in
+			// the response, which field is the monotonic cursor, and which
+			// field carries the human-readable text. Consumers (e.g. XiaoMAO's
+			// stream poller) read it from the route metadata and drive any
+			// stream endpoint without endpoint-specific code.
+			for _, arg := range args {
+				k, v, ok := strings.Cut(arg, "=")
+				if !ok {
+					continue
+				}
+				k = strings.TrimSpace(k)
+				v = strings.TrimSpace(v)
+				if k == "" || v == "" {
+					continue
+				}
+				if d.StreamContract == nil {
+					d.StreamContract = make(map[string]string)
+				}
+				d.StreamContract[k] = v
+			}
 		case "@topic":
 			if len(args) > 0 {
 				d.Topic = args[0]

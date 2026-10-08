@@ -420,16 +420,17 @@ type RateLimitConfig struct {
 }
 
 type Route struct {
-	ID          HandlerID        ` + "`json:\"id\"`" + `
-	Transport   Transport        ` + "`json:\"transport\"`" + `
-	Method      string           ` + "`json:\"method\"`" + `
-	Path        string           ` + "`json:\"path\"`" + `
-	Description string           ` + "`json:\"description,omitempty\"`" + `
-	Auth        string           ` + "`json:\"auth,omitempty\"`" + `
-	Scopes      []string         ` + "`json:\"scopes,omitempty\"`" + `
-	Guards      []string         ` + "`json:\"guards,omitempty\"`" + `
-	RateLimit   *RateLimitConfig ` + "`json:\"ratelimit,omitempty\"`" + `
-	Shape       Shape            ` + "`json:\"shape,omitempty\"`" + `
+	ID          HandlerID         ` + "`json:\"id\"`" + `
+	Transport   Transport         ` + "`json:\"transport\"`" + `
+	Method      string            ` + "`json:\"method\"`" + `
+	Path        string            ` + "`json:\"path\"`" + `
+	Description string            ` + "`json:\"description,omitempty\"`" + `
+	Auth        string            ` + "`json:\"auth,omitempty\"`" + `
+	Scopes      []string          ` + "`json:\"scopes,omitempty\"`" + `
+	Guards      []string          ` + "`json:\"guards,omitempty\"`" + `
+	RateLimit   *RateLimitConfig  ` + "`json:\"ratelimit,omitempty\"`" + `
+	Shape       Shape             ` + "`json:\"shape,omitempty\"`" + `
+	Metadata    map[string]string ` + "`json:\"metadata,omitempty\"`" + `
 }
 
 type Contract struct {

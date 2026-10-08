@@ -13,6 +13,7 @@ import (
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/runtime"
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/telemetry"
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/transport/rest"
+	"github.com/Neuxbane/NeuXbaneProtocol/internal/transport/websocket"
 )
 
 func main() {
@@ -48,6 +49,12 @@ func main() {
 	// Mount REST adapter
 	restAdapter := rest.NewAdapter(mother.Dispatch)
 	restAdapter.SetIntrospector(interceptor.Intercept)
+
+	// Mount WebSocket adapter. It shares the REST listener: the REST adapter
+	// detects "Upgrade: websocket" handshakes and delegates them here, so both
+	// transports are served on the same port.
+	wsAdapter := websocket.NewAdapter(mother.Dispatch)
+	restAdapter.SetWebSocketHandler(wsAdapter.Handler(mother.Table()))
 
 	listener, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {

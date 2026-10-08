@@ -402,6 +402,24 @@ func parseFuncSignature(fn *ast.FuncDecl) *HandlerInfo {
 	}
 }
 
+// buildRouteMetadata assembles the route metadata map from directives. It is
+// the single place where declarative, transport-agnostic route hints (such as
+// the live-stream poll contract) are lifted into abi.Route.Metadata so that
+// generic consumers can read them from the schema bundle.
+func buildRouteMetadata(d *Directives) map[string]string {
+	if d == nil {
+		return nil
+	}
+	md := make(map[string]string)
+	for k, v := range d.StreamContract {
+		md["stream."+k] = v
+	}
+	if len(md) == 0 {
+		return nil
+	}
+	return md
+}
+
 // BuildShape constructs an abi.Shape based on transport, directives, and handler types.
 func BuildShape(transport abi.Transport, d *Directives, info *HandlerInfo) abi.Shape {
 	switch transport {

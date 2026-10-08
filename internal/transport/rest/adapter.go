@@ -34,6 +34,7 @@ type Adapter struct {
 	server       *http.Server
 	table        *router.Table
 	introspectFn func(w http.ResponseWriter, r *http.Request, table *router.Table) bool
+	wsHandler    http.Handler
 	mu           sync.RWMutex
 }
 
@@ -56,6 +57,16 @@ func (a *Adapter) SetIntrospector(fn func(w http.ResponseWriter, r *http.Request
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.introspectFn = fn
+}
+
+// SetWebSocketHandler registers an http.Handler that serves WebSocket upgrade
+// requests. When set, the REST adapter delegates any request carrying an
+// "Upgrade: websocket" header to this handler, allowing both transports to
+// share a single listener/port.
+func (a *Adapter) SetWebSocketHandler(h http.Handler) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.wsHandler = h
 }
 
 // Name implements transport.Adapter.
@@ -97,27 +108,9 @@ func (a *Adapter) Normalize(raw any) (*abi.Request, error) {
 		req.Body = bodyBytes
 	}
 
-	// Extract identity from Authorization Bearer header or auth cookies if present
-	token := ""
-	authHeader := httpReq.Header.Get("Authorization")
-	if strings.HasPrefix(authHeader, "Bearer ") {
-		token = strings.TrimPrefix(authHeader, "Bearer ")
-	} else if cookie, err := httpReq.Cookie("xm_session"); err == nil && cookie.Value != "" {
-		token = cookie.Value
-	} else if cookie, err := httpReq.Cookie("token"); err == nil && cookie.Value != "" {
-		token = cookie.Value
-	} else if cookie, err := httpReq.Cookie("auth_token"); err == nil && cookie.Value != "" {
-		token = cookie.Value
-	} else if cookie, err := httpReq.Cookie("session"); err == nil && cookie.Value != "" {
-		token = cookie.Value
-	}
-
-	if token != "" {
-		req.Identity = &abi.Identity{
-			Subject: token,
-			Raw:     token,
-		}
-	}
+	// Extract identity from the Authorization Bearer header or the well-known
+	// auth cookies (shared with the WebSocket transport).
+	req.Identity = transport.ExtractIdentity(httpReq)
 
 	return req, nil
 }
@@ -302,6 +295,18 @@ func (s *statusWriter) Write(b []byte) (int, error) {
 }
 
 func (a *Adapter) handleHTTP(w http.ResponseWriter, r *http.Request) {
+	// 0. Delegate WebSocket upgrade requests to the WebSocket adapter so both
+	// transports can share a single listener/port.
+	if isWebSocketUpgrade(r) {
+		a.mu.RLock()
+		wsHandler := a.wsHandler
+		a.mu.RUnlock()
+		if wsHandler != nil {
+			wsHandler.ServeHTTP(w, r)
+			return
+		}
+	}
+
 	start := time.Now()
 	sw := &statusWriter{ResponseWriter: w, status: 200}
 
@@ -400,6 +405,19 @@ func (a *Adapter) Shutdown(ctx context.Context) error {
 		return a.server.Shutdown(ctx)
 	}
 	return nil
+}
+
+// isWebSocketUpgrade reports whether r is a WebSocket upgrade handshake.
+func isWebSocketUpgrade(r *http.Request) bool {
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return false
+	}
+	for _, token := range strings.Split(r.Header.Get("Connection"), ",") {
+		if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+			return true
+		}
+	}
+	return false
 }
 
 // JSONResponse helper parses data into an *abi.Response.

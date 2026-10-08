@@ -37,6 +37,12 @@ func HandleSchemaBundle(w http.ResponseWriter, r *http.Request, table *router.Ta
 		if e.Route.Description != "" {
 			def["description"] = e.Route.Description
 		}
+		// Surface route metadata (e.g. the declarative stream poll contract)
+		// so generic consumers can drive the route without endpoint-specific
+		// code. Keys are namespaced (e.g. "stream.action").
+		if len(e.Route.Metadata) > 0 {
+			def["metadata"] = e.Route.Metadata
+		}
 		schemas[string(e.Route.ID)] = def
 	}
 

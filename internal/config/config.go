@@ -2,6 +2,8 @@
 package config
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"time"
@@ -67,7 +69,11 @@ func DefaultConfig() *Config {
 
 	sockDir := os.Getenv("NXP_SOCK_DIR")
 	if sockDir == "" {
-		sockDir = filepath.Join(os.TempDir(), "nxp-sockets")
+		// Scope the socket directory per application instance so that multiple
+		// nxp servers running on the same host never share (and therefore never
+		// delete) each other's worker binaries or sockets on shutdown.
+		base := filepath.Join(os.TempDir(), "nxp-sockets")
+		sockDir = filepath.Join(base, instanceKey())
 	}
 
 	addr := os.Getenv("NXP_ADDR")
@@ -100,4 +106,20 @@ func DefaultConfig() *Config {
 			BundlePath: "/__nxp/schema",
 		},
 	}
+}
+
+// instanceKey derives a stable, filesystem-safe identifier for the current
+// application instance from its absolute working directory. It is used to give
+// each nxp server its own socket subdirectory so that concurrent servers on the
+// same host do not clobber one another's worker artifacts.
+func instanceKey() string {
+	wd, err := os.Getwd()
+	if err != nil || wd == "" {
+		wd = "default"
+	}
+	if abs, err := filepath.Abs(wd); err == nil {
+		wd = abs
+	}
+	sum := sha256.Sum256([]byte(wd))
+	return hex.EncodeToString(sum[:8])
 }

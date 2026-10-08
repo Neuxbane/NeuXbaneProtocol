@@ -442,7 +442,7 @@ func RenderHTML(view *Response) string {
 
             <!-- Request Body Mode Switcher -->
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-              <span style="font-size:14px; font-weight:600;">Request Body</span>
+              <span id="req-payload-title" style="font-size:14px; font-weight:600;">Request Body</span>
               <div style="display:flex; gap:6px;">
                 <button type="button" id="btn-mode-form" class="pill active" style="padding:3px 10px; font-size:12px;" onclick="setBodyMode('form')">Form Builder</button>
                 <button type="button" id="btn-mode-json" class="pill" style="padding:3px 10px; font-size:12px;" onclick="setBodyMode('json')">Raw JSON</button>
@@ -574,6 +574,11 @@ func RenderHTML(view *Response) string {
 
     // Dynamic Form Builder
     function buildFormFromSchema(initialValues) {
+      const method = document.getElementById('req-method').value;
+      const titleEl = document.getElementById('req-payload-title');
+      if (titleEl) {
+        titleEl.textContent = (method === 'GET' || method === 'HEAD') ? 'Query Parameters' : 'Request Body';
+      }
       const root = document.getElementById('schema-form-root');
       root.innerHTML = '';
       const reqSchema = getRequestSchema();
@@ -772,7 +777,7 @@ func RenderHTML(view *Response) string {
     async function sendRequest() {
       const btn = document.getElementById('btn-send');
       const method = document.getElementById('req-method').value;
-      const url = document.getElementById('req-url').value;
+      let url = document.getElementById('req-url').value;
 
       const headers = {
         'Content-Type': 'application/json'
@@ -784,12 +789,34 @@ func RenderHTML(view *Response) string {
         credentials: 'same-origin'
       };
 
-      // Attach body if method allows
+      // Attach body if method allows, otherwise serialize to query string
       if (method !== 'GET' && method !== 'HEAD') {
         if (currentBodyMode === 'json') {
           options.body = document.getElementById('raw-json-editor').value;
         } else {
           options.body = JSON.stringify(formDataModel);
+        }
+      } else {
+        delete headers['Content-Type'];
+        let params = {};
+        if (currentBodyMode === 'json') {
+          try {
+            params = JSON.parse(document.getElementById('raw-json-editor').value);
+          } catch(e) {}
+        } else {
+          params = formDataModel;
+        }
+        if (params && typeof params === 'object') {
+          const sp = new URLSearchParams();
+          for (const [k, v] of Object.entries(params)) {
+            if (v !== undefined && v !== null && v !== '') {
+              sp.append(k, v);
+            }
+          }
+          const qs = sp.toString();
+          if (qs) {
+            url += (url.includes('?') ? '&' : '?') + qs;
+          }
         }
       }
 

@@ -183,7 +183,14 @@ func (m *Mother) Shutdown(ctx context.Context) error {
 
 	// Drain all workers
 	err := m.supervisor.DrainAll(ctx)
-	_ = os.RemoveAll(m.cfg.SocketDir)
+
+	// Remove only the worker binary this instance built. Never RemoveAll the
+	// socket directory: it may be shared with other running nxp servers, and
+	// wiping it would delete their worker binaries and sockets.
+	if m.currentBuildID != "" {
+		binPath := filepath.Join(m.cfg.SocketDir, fmt.Sprintf("nxp-worker-%s", m.currentBuildID))
+		_ = os.Remove(binPath)
+	}
 	telemetry.LogService("mother", "mother process shutdown complete")
 	return err
 }

@@ -85,6 +85,11 @@ func (a *Adapter) Normalize(raw any) (*abi.Request, error) {
 		req.Query[k] = v
 	}
 
+	// Extract identity from the Authorization Bearer header or the well-known
+	// auth cookies (shared with the REST transport) so that guarded WebSocket
+	// routes pass ingress contract validation and folder guards see the caller.
+	req.Identity = transport.ExtractIdentity(httpReq)
+
 	return req, nil
 }
 
@@ -184,8 +189,27 @@ func (a *Adapter) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if msgType == websocket.TextMessage || msgType == websocket.BinaryMessage {
-			msgReq := abi.NewRequest(abi.TransportWebSocket, "MESSAGE", r.URL.Path)
+			// Each frame is dispatched as its own request. Carry over the
+			// handshake context (headers, query, params, identity) so that
+			// guards and handlers see the same authenticated caller that was
+			// established during the upgrade. Without this, cookie/bearer
+			// auth would succeed on the handshake but fail on every frame.
+			//
+			// The method must match the route's registered method ("CONNECT")
+			// so the router resolves the same handler that served the upgrade.
+			msgReq := abi.NewRequest(abi.TransportWebSocket, "CONNECT", r.URL.Path)
+			msgReq.RoutePath = abiReq.RoutePath
 			msgReq.Body = msg
+			for k, v := range abiReq.Headers {
+				msgReq.Headers[k] = v
+			}
+			for k, v := range abiReq.Query {
+				msgReq.Query[k] = v
+			}
+			for k, v := range abiReq.Params {
+				msgReq.Params[k] = v
+			}
+			msgReq.Identity = abiReq.Identity
 
 			if a.dispatcher != nil {
 				resp, err := a.dispatcher(r.Context(), msgReq)
@@ -203,4 +227,14 @@ func (a *Adapter) Shutdown(ctx context.Context) error {
 		return a.server.Shutdown(ctx)
 	}
 	return nil
+}
+
+// Handler returns an http.Handler that serves WebSocket upgrade requests using
+// the adapter's route table. It lets a host server (e.g. the REST adapter)
+// delegate upgrade requests so both transports share one listener/port.
+func (a *Adapter) Handler(table *router.Table) http.Handler {
+	a.table = table
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		a.handleUpgrade(w, r)
+	})
 }

@@ -7,10 +7,22 @@ import (
 	"go/format"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/abi"
 )
+
+// sortedKeys returns the keys of m in deterministic (lexical) order so that
+// generated code is stable across builds.
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
 
 // RouteCodegenItem links a file route with its reflected handler info.
 type RouteCodegenItem struct {
@@ -135,6 +147,13 @@ func EmitGeneratedRoutesWithPackage(pkgName, modulePath, buildID string, items [
 		if item.Route.RateLimit != nil {
 			buf.WriteString(fmt.Sprintf("\t\tRateLimit: &abi.RateLimitConfig{RPS: %d, Burst: %d},\n",
 				item.Route.RateLimit.RPS, item.Route.RateLimit.Burst))
+		}
+		if len(item.Route.Metadata) > 0 {
+			buf.WriteString("\t\tMetadata: map[string]string{\n")
+			for _, k := range sortedKeys(item.Route.Metadata) {
+				buf.WriteString(fmt.Sprintf("\t\t\t%q: %q,\n", k, item.Route.Metadata[k]))
+			}
+			buf.WriteString("\t\t},\n")
 		}
 		// Shape representation
 		buf.WriteString(emitShapeCode(item.Route.Shape))
@@ -317,6 +336,7 @@ func GenerateProject(defineDir, modulePath, outputGenFile, buildIDFile string) (
 			Guards:      fr.Guards,
 			RateLimit:   fr.Directives.RateLimit,
 			Shape:       shape,
+			Metadata:    buildRouteMetadata(fr.Directives),
 		}
 
 		items = append(items, RouteCodegenItem{
@@ -440,6 +460,7 @@ func GenerateWorkerProject(defineDir, modulePath, workerDir, buildIDFile string)
 			Guards:      fr.Guards,
 			RateLimit:   fr.Directives.RateLimit,
 			Shape:       shape,
+			Metadata:    buildRouteMetadata(fr.Directives),
 		}
 
 		items = append(items, RouteCodegenItem{
