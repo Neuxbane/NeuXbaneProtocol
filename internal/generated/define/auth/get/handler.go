@@ -1,3 +1,4 @@
+// @guard
 // Package auth handles authentication operations.
 // @desc Get the caller profile status
 // @auth required

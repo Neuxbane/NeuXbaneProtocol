@@ -1,3 +1,4 @@
+// @guard
 // @desc Download a stored file
 package get
 

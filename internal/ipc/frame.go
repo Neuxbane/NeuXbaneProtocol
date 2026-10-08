@@ -16,9 +16,13 @@ const (
 	FrameTypeReady    FrameType = "ready"
 	FrameTypeRequest  FrameType = "request"
 	FrameTypeResponse FrameType = "response"
-	FrameTypePing     FrameType = "ping"
-	FrameTypePong     FrameType = "pong"
-	FrameTypeDrain    FrameType = "drain"
+	FrameTypePing         FrameType = "ping"
+	FrameTypePong         FrameType = "pong"
+	FrameTypeDrain        FrameType = "drain"
+	FrameTypeStreamStart  FrameType = "stream_start"
+	FrameTypeStreamData   FrameType = "stream_data"
+	FrameTypeStreamEnd    FrameType = "stream_end"
+	FrameTypeStreamCancel FrameType = "stream_cancel"
 )
 
 // FrameHeader carries routing, timing, and length metadata for an IPC frame.

@@ -35,6 +35,7 @@ type Adapter struct {
 	table        *router.Table
 	introspectFn func(w http.ResponseWriter, r *http.Request, table *router.Table) bool
 	wsHandler    http.Handler
+	sseHandler   http.Handler
 	mu           sync.RWMutex
 }
 
@@ -67,6 +68,14 @@ func (a *Adapter) SetWebSocketHandler(h http.Handler) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.wsHandler = h
+}
+
+// SetSSEHandler registers an http.Handler that serves Server-Sent Events (SSE).
+// When set, requests targeting an SSE route are delegated here.
+func (a *Adapter) SetSSEHandler(h http.Handler) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sseHandler = h
 }
 
 // Name implements transport.Adapter.
@@ -307,6 +316,18 @@ func (a *Adapter) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// 0.1 Delegate SSE requests to the SSE adapter if configured and matching an SSE route
+	a.mu.RLock()
+	sseHandler := a.sseHandler
+	table := a.table
+	a.mu.RUnlock()
+	if sseHandler != nil && table != nil {
+		if _, _, found := table.Load(abi.TransportSSE, r.Method, r.URL.Path); found {
+			sseHandler.ServeHTTP(w, r)
+			return
+		}
+	}
+
 	start := time.Now()
 	sw := &statusWriter{ResponseWriter: w, status: 200}
 
@@ -327,7 +348,7 @@ func (a *Adapter) handleHTTP(w http.ResponseWriter, r *http.Request) {
 	a.mu.RLock()
 	introspectFn := a.introspectFn
 	dispatcher := a.dispatcher
-	table := a.table
+	table = a.table
 	a.mu.RUnlock()
 
 	if r.URL.Query().Has("nxp") && introspectFn != nil {

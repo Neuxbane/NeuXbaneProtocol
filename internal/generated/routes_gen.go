@@ -5,7 +5,7 @@
 //  Any manual change will be silently overwritten on the next build.
 //  To change routing, guards, or contracts, edit the define/ tree instead.
 // ============================================================================
-// Build ID: f18695a3a011e863
+// Build ID: 72374d0f4b9a1efe
 
 package generated
 
@@ -32,6 +32,7 @@ import (
 	pkg_6 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/sensors/telemetry/mqtt"
 	pkg_7 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/storage/download/get"
 	pkg_8 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/storage/upload/post"
+	pkg_9 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/stream/ws"
 )
 
 // Silence unused domain import warnings.
@@ -44,12 +45,13 @@ var (
 	_ = rest.NewCtx
 	_ = files.NewDownloadCtx
 	_ = ws.NewCtx
+	_ = ws.NewStreamCtx
 	_ = rtc.NewSessionCtx
 	_ = mqtt.NewCtx[any, any]
 	_ = worker.Runtime{}
 )
 
-const BuildID = "f18695a3a011e863"
+const BuildID = "72374d0f4b9a1efe"
 
 // GeneratedRoutes contains all compiled routes in the project.
 var GeneratedRoutes = []abi.Route{
@@ -155,6 +157,16 @@ var GeneratedRoutes = []abi.Route{
 			Responses: map[int]*abi.Schema{200: abi.MustCompile([]byte("{\"type\":\"object\"}"))},
 		},
 	},
+	{
+		ID:        "connect.stream",
+		Transport: abi.Transport("websocket"),
+		Method:    "CONNECT",
+		Path:      "/stream",
+		Shape: abi.StreamShape{
+			Partitions:    0,
+			ConsumerGroup: "",
+		},
+	},
 }
 
 // GeneratedContract defines the system-wide contract for this build.
@@ -243,5 +255,21 @@ var GeneratedRegistry = map[abi.HandlerID]worker.HandlerFunc{
 			return abi.NewErrorResponse(err), nil
 		}
 		return abi.NewAutoResponse(nil, 200, res)
+	},
+	"connect.stream": func(req *abi.Request) (*abi.Response, error) {
+		ctx := ws.NewCtx(context.Background(), req, nil, nil)
+		err := pkg_9.Handler(ctx)
+		if err != nil {
+			return abi.NewErrorResponse(err), nil
+		}
+		return abi.NewResponse(204, nil), nil
+	},
+}
+
+// GeneratedStreamRegistry maps every streaming HandlerID to an executable worker streaming adapter.
+var GeneratedStreamRegistry = map[abi.HandlerID]worker.StreamHandlerFunc{
+	"connect.stream": func(ctx context.Context, req *abi.Request, sink abi.StreamSink, in <-chan []byte) error {
+		wsCtx := ws.NewStreamCtx(ctx, req, sink, in)
+		return pkg_9.Handler(wsCtx)
 	},
 }

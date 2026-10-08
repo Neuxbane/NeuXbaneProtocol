@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -631,6 +632,11 @@ func NewDownloadCtx(id string, params map[string]string) *DownloadCtx {
 
 func (c *DownloadCtx) ID() string { return c.id }
 
+type StreamSink interface {
+	Send(data any) error
+	Close() error
+}
+
 type WsFrame struct {
 	Type int
 	Data []byte
@@ -638,17 +644,118 @@ type WsFrame struct {
 
 type WsCtx struct {
 	context.Context
-	req *Request
+	req     *Request
+	inChan  <-chan []byte
+	outChan chan<- []byte
+	sink    StreamSink
+	sendMu  sync.Mutex
 }
 
 func NewWsCtx(parent context.Context, req *Request, in, out any) *WsCtx {
 	if parent == nil {
 		parent = context.Background()
 	}
-	return &WsCtx{Context: parent, req: req}
+	c := &WsCtx{
+		Context: parent,
+		req:     req,
+	}
+	if inCh, ok := in.(<-chan []byte); ok {
+		c.inChan = inCh
+	}
+	if outCh, ok := out.(chan<- []byte); ok {
+		c.outChan = outCh
+	}
+	if sink, ok := out.(StreamSink); ok {
+		c.sink = sink
+	}
+	return c
+}
+
+func NewWsStreamCtx(parent context.Context, req *Request, sink StreamSink, in <-chan []byte) *WsCtx {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return &WsCtx{
+		Context: parent,
+		req:     req,
+		sink:    sink,
+		inChan:  in,
+	}
 }
 
 func (c *WsCtx) Request() *Request { return c.req }
+func (c *WsCtx) Param(name string) string {
+	if c.req == nil { return "" }
+	return c.req.Param(name)
+}
+func (c *WsCtx) Query(key string) string {
+	if c.req == nil { return "" }
+	return c.req.QueryParam(key)
+}
+func (c *WsCtx) Header(key string) string {
+	if c.req == nil { return "" }
+	return c.req.Header(key)
+}
+func (c *WsCtx) Identity() *Identity {
+	if c.req == nil { return nil }
+	return c.req.Identity
+}
+func (c *WsCtx) Bind(target any) error {
+	if c.req == nil { return nil }
+	return c.req.BindJSON(target)
+}
+func (c *WsCtx) Next() ([]byte, error) {
+	select {
+	case <-c.Done():
+		return nil, c.Err()
+	case msg, ok := <-c.inChan:
+		if !ok {
+			return nil, io.EOF
+		}
+		return msg, nil
+	}
+}
+func (c *WsCtx) Send(data any) error {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+
+	select {
+	case <-c.Done():
+		return c.Err()
+	default:
+	}
+
+	if c.sink != nil {
+		return c.sink.Send(data)
+	}
+
+	var b []byte
+	switch v := data.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		var err error
+		b, err = json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("marshal send data: %w", err)
+		}
+	}
+
+	if c.outChan != nil {
+		select {
+		case <-c.Done():
+			return c.Err()
+		case c.outChan <- b:
+			return nil
+		}
+	}
+	return nil
+}
+func (c *WsCtx) Write(data []byte) error { return c.Send(data) }
+func (c *WsCtx) WriteJSON(v any) error { return c.Send(v) }
+
 
 type VideoProfile string
 

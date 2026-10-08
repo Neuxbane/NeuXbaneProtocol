@@ -18,6 +18,7 @@ type Directives struct {
 	Guards            []string
 	HasGuardDirective bool
 	RateLimit         *abi.RateLimitConfig
+	Shape             string
 	Stream            bool
 	Topic             string
 	QoS               int
@@ -99,6 +100,13 @@ func ParseDirectives(content string) *Directives {
 				rps, _ := strconv.Atoi(args[0])
 				burst, _ := strconv.Atoi(args[1])
 				d.RateLimit = &abi.RateLimitConfig{RPS: rps, Burst: burst}
+			}
+		case "@shape":
+			if len(args) > 0 {
+				d.Shape = strings.ToLower(args[0])
+				if d.Shape == "stream" {
+					d.Stream = true
+				}
 			}
 		case "@stream":
 			d.Stream = true

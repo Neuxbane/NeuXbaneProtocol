@@ -3,8 +3,12 @@
 package abi
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"sync"
+
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/errors"
 )
 
@@ -382,3 +386,168 @@ type Ready struct {
 	Status     string `json:"status"` // "ready"
 	Message    string `json:"message,omitempty"`
 }
+
+// StreamSink is an interface for pushing events or frames down an active connection.
+type StreamSink interface {
+	Send(data any) error
+	Close() error
+}
+
+// WsFrame represents a raw WebSocket frame.
+type WsFrame struct {
+	Type int
+	Data []byte
+}
+
+// WsCtx is the execution context for WebSocket handlers, supporting both
+// synchronous frame-by-frame RPC and long-lived streaming / server-push.
+type WsCtx struct {
+	context.Context
+	req     *Request
+	inChan  <-chan []byte
+	outChan chan<- []byte
+	sink    StreamSink
+	sendMu  sync.Mutex
+}
+
+// NewWsCtx constructs an initialized WebSocket Ctx.
+func NewWsCtx(parent context.Context, req *Request, in, out any) *WsCtx {
+	if parent == nil {
+		parent = context.Background()
+	}
+	c := &WsCtx{
+		Context: parent,
+		req:     req,
+	}
+	if inCh, ok := in.(<-chan []byte); ok {
+		c.inChan = inCh
+	}
+	if outCh, ok := out.(chan<- []byte); ok {
+		c.outChan = outCh
+	}
+	if sink, ok := out.(StreamSink); ok {
+		c.sink = sink
+	}
+	return c
+}
+
+// NewWsStreamCtx constructs a WebSocket Ctx backed by a StreamSink and inbound channel.
+func NewWsStreamCtx(parent context.Context, req *Request, sink StreamSink, in <-chan []byte) *WsCtx {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return &WsCtx{
+		Context: parent,
+		req:     req,
+		sink:    sink,
+		inChan:  in,
+	}
+}
+
+// Request returns the underlying request.
+func (c *WsCtx) Request() *Request { return c.req }
+
+// Param returns a path parameter by name.
+func (c *WsCtx) Param(name string) string {
+	if c.req == nil {
+		return ""
+	}
+	return c.req.Param(name)
+}
+
+// Query returns a query parameter value.
+func (c *WsCtx) Query(key string) string {
+	if c.req == nil {
+		return ""
+	}
+	return c.req.QueryParam(key)
+}
+
+// Header returns a header value.
+func (c *WsCtx) Header(key string) string {
+	if c.req == nil {
+		return ""
+	}
+	return c.req.Header(key)
+}
+
+// Identity returns the authenticated identity if present.
+func (c *WsCtx) Identity() *Identity {
+	if c.req == nil {
+		return nil
+	}
+	return c.req.Identity
+}
+
+// Bind unmarshals the initial request payload into target.
+func (c *WsCtx) Bind(target any) error {
+	if c.req == nil {
+		return nil
+	}
+	return c.req.BindJSON(target)
+}
+
+// Next awaits the next inbound message frame from the client.
+func (c *WsCtx) Next() ([]byte, error) {
+	select {
+	case <-c.Done():
+		return nil, c.Err()
+	case msg, ok := <-c.inChan:
+		if !ok {
+			return nil, io.EOF
+		}
+		return msg, nil
+	}
+}
+
+// Send serializes and pushes data to the client in a thread-safe manner.
+func (c *WsCtx) Send(data any) error {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+
+	select {
+	case <-c.Done():
+		return c.Err()
+	default:
+	}
+
+	if c.sink != nil {
+		return c.sink.Send(data)
+	}
+
+	var b []byte
+	switch v := data.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		var err error
+		b, err = json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("marshal send data: %w", err)
+		}
+	}
+
+	if c.outChan != nil {
+		select {
+		case <-c.Done():
+			return c.Err()
+		case c.outChan <- b:
+			return nil
+		}
+	}
+
+	return nil
+}
+
+// Write sends an outbound frame to the connected client.
+func (c *WsCtx) Write(data []byte) error {
+	return c.Send(data)
+}
+
+// WriteJSON serializes v as JSON and transmits it to the client.
+func (c *WsCtx) WriteJSON(v any) error {
+	return c.Send(v)
+}
+

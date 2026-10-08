@@ -27,6 +27,9 @@ func main() {
 		if handler, ok := generated.GeneratedRegistry[route.ID]; ok {
 			w.RegisterHandler(route, handler)
 		}
+		if sHandler, ok := generated.GeneratedStreamRegistry[route.ID]; ok {
+			w.RegisterStreamHandler(route, sHandler)
+		}
 	}
 
 	if err := w.Start(context.Background()); err != nil {

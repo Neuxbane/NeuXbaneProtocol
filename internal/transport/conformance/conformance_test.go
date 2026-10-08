@@ -14,6 +14,7 @@ import (
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/transport/nats"
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/transport/redis"
 	_ "github.com/Neuxbane/NeuXbaneProtocol/internal/transport/rest"
+	_ "github.com/Neuxbane/NeuXbaneProtocol/internal/transport/sse"
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/transport/udp"
 	_ "github.com/Neuxbane/NeuXbaneProtocol/internal/transport/webrtc"
 	_ "github.com/Neuxbane/NeuXbaneProtocol/internal/transport/websocket"
@@ -71,6 +72,19 @@ func TestTransportConformance(t *testing.T) {
 				}
 				if req.Path != "/ws/chat" {
 					t.Errorf("expected /ws/chat, got %s", req.Path)
+				}
+
+			case abi.TransportSSE:
+				raw := httptest.NewRequest("GET", "/events?channel=news", nil)
+				req, err := a.Normalize(raw)
+				if err != nil {
+					t.Fatalf("normalize sse failed: %v", err)
+				}
+				if req.Transport != abi.TransportSSE {
+					t.Errorf("expected transport sse, got %s", req.Transport)
+				}
+				if req.Path != "/events" {
+					t.Errorf("expected /events, got %s", req.Path)
 				}
 
 			case abi.TransportGRPC:

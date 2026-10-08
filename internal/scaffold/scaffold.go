@@ -881,6 +881,11 @@ func NewDownloadCtx(id string, params map[string]string) *DownloadCtx {
 
 func (c *DownloadCtx) ID() string { return c.id }
 
+type StreamSink interface {
+	Send(data any) error
+	Close() error
+}
+
 type WsFrame struct {
 	Type int
 	Data []byte
@@ -888,17 +893,118 @@ type WsFrame struct {
 
 type WsCtx struct {
 	context.Context
-	req *Request
+	req     *Request
+	inChan  <-chan []byte
+	outChan chan<- []byte
+	sink    StreamSink
+	sendMu  sync.Mutex
 }
 
 func NewWsCtx(parent context.Context, req *Request, in, out any) *WsCtx {
 	if parent == nil {
 		parent = context.Background()
 	}
-	return &WsCtx{Context: parent, req: req}
+	c := &WsCtx{
+		Context: parent,
+		req:     req,
+	}
+	if inCh, ok := in.(<-chan []byte); ok {
+		c.inChan = inCh
+	}
+	if outCh, ok := out.(chan<- []byte); ok {
+		c.outChan = outCh
+	}
+	if sink, ok := out.(StreamSink); ok {
+		c.sink = sink
+	}
+	return c
+}
+
+func NewWsStreamCtx(parent context.Context, req *Request, sink StreamSink, in <-chan []byte) *WsCtx {
+	if parent == nil {
+		parent = context.Background()
+	}
+	return &WsCtx{
+		Context: parent,
+		req:     req,
+		sink:    sink,
+		inChan:  in,
+	}
 }
 
 func (c *WsCtx) Request() *Request { return c.req }
+func (c *WsCtx) Param(name string) string {
+	if c.req == nil { return "" }
+	return c.req.Param(name)
+}
+func (c *WsCtx) Query(key string) string {
+	if c.req == nil { return "" }
+	return c.req.QueryParam(key)
+}
+func (c *WsCtx) Header(key string) string {
+	if c.req == nil { return "" }
+	return c.req.Header(key)
+}
+func (c *WsCtx) Identity() *Identity {
+	if c.req == nil { return nil }
+	return c.req.Identity
+}
+func (c *WsCtx) Bind(target any) error {
+	if c.req == nil { return nil }
+	return c.req.BindJSON(target)
+}
+func (c *WsCtx) Next() ([]byte, error) {
+	select {
+	case <-c.Done():
+		return nil, c.Err()
+	case msg, ok := <-c.inChan:
+		if !ok {
+			return nil, io.EOF
+		}
+		return msg, nil
+	}
+}
+func (c *WsCtx) Send(data any) error {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+
+	select {
+	case <-c.Done():
+		return c.Err()
+	default:
+	}
+
+	if c.sink != nil {
+		return c.sink.Send(data)
+	}
+
+	var b []byte
+	switch v := data.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		var err error
+		b, err = json.Marshal(v)
+		if err != nil {
+			return fmt.Errorf("marshal send data: %w", err)
+		}
+	}
+
+	if c.outChan != nil {
+		select {
+		case <-c.Done():
+			return c.Err()
+		case c.outChan <- b:
+			return nil
+		}
+	}
+	return nil
+}
+func (c *WsCtx) Write(data []byte) error { return c.Send(data) }
+func (c *WsCtx) WriteJSON(v any) error { return c.Send(v) }
+
 
 type VideoProfile string
 
@@ -1036,7 +1142,10 @@ type (
 	Ctx   = abi.WsCtx
 )
 
-var NewCtx = abi.NewWsCtx
+var (
+	NewCtx       = abi.NewWsCtx
+	NewStreamCtx = abi.NewWsStreamCtx
+)
 `
 
 const abiRtcGo = `package rtc
@@ -1135,6 +1244,9 @@ import (
 // HandlerFunc is the internal dispatch adapter for a business logic route handler.
 type HandlerFunc func(*abi.Request) (*abi.Response, error)
 
+// StreamHandlerFunc is the internal dispatch adapter for a business logic streaming route handler.
+type StreamHandlerFunc func(ctx context.Context, req *abi.Request, sink abi.StreamSink, in <-chan []byte) error
+
 type frameHeader struct {
 	Type       string            ` + "`json:\"type\"`" + `
 	ID         string            ` + "`json:\"id\"`" + `
@@ -1199,12 +1311,17 @@ func writeFrame(w io.Writer, f *frame) error {
 
 // Runtime orchestrates the worker-side process lifecycle.
 type Runtime struct {
-	workerName string
-	buildID    string
-	sockPath   string
-	routes     []abi.Route
-	handlers   map[abi.HandlerID]HandlerFunc
-	handlersMu sync.RWMutex
+	workerName     string
+	buildID        string
+	sockPath       string
+	routes         []abi.Route
+	handlers       map[abi.HandlerID]HandlerFunc
+	streamHandlers map[abi.HandlerID]StreamHandlerFunc
+	handlersMu     sync.RWMutex
+
+	activeStreams map[string]context.CancelFunc
+	activeInChans map[string]chan []byte
+	streamsMu     sync.Mutex
 
 	conn     net.Conn
 	inFlight atomic.Int64
@@ -1215,11 +1332,14 @@ type Runtime struct {
 // NewRuntime initializes a worker Runtime instance.
 func NewRuntime(workerName, buildID, sockPath string) *Runtime {
 	return &Runtime{
-		workerName: workerName,
-		buildID:    buildID,
-		sockPath:   sockPath,
-		handlers:   make(map[abi.HandlerID]HandlerFunc),
-		stopChan:   make(chan struct{}),
+		workerName:     workerName,
+		buildID:        buildID,
+		sockPath:       sockPath,
+		handlers:       make(map[abi.HandlerID]HandlerFunc),
+		streamHandlers: make(map[abi.HandlerID]StreamHandlerFunc),
+		activeStreams:  make(map[string]context.CancelFunc),
+		activeInChans:  make(map[string]chan []byte),
+		stopChan:       make(chan struct{}),
 	}
 }
 
@@ -1229,6 +1349,14 @@ func (r *Runtime) RegisterHandler(route abi.Route, fn HandlerFunc) {
 	defer r.handlersMu.Unlock()
 	r.routes = append(r.routes, route)
 	r.handlers[route.ID] = fn
+}
+
+// RegisterStreamHandler registers a streaming route and its handler adapter in the worker runtime.
+func (r *Runtime) RegisterStreamHandler(route abi.Route, fn StreamHandlerFunc) {
+	r.handlersMu.Lock()
+	defer r.handlersMu.Unlock()
+	r.routes = append(r.routes, route)
+	r.streamHandlers[route.ID] = fn
 }
 
 // Start connects to WORKER_SOCK, transmits Hello, awaits Ready, and enters request serving.
@@ -1343,8 +1471,139 @@ func (r *Runtime) serveLoop() error {
 				_ = writeFrame(r.conn, respFrame)
 				writeMu.Unlock()
 			}(f)
+		case "stream_start":
+			r.inFlight.Add(1)
+			go func(streamFrame *frame) {
+				defer r.inFlight.Add(-1)
+				r.handleStreamStart(streamFrame, &writeMu)
+			}(f)
+		case "stream_data":
+			r.handleStreamData(f)
+		case "stream_cancel":
+			r.handleStreamCancel(f)
 		}
 	}
+}
+
+func (r *Runtime) handleStreamStart(f *frame, writeMu *sync.Mutex) {
+	var req abi.Request
+	if err := json.Unmarshal(f.Body, &req); err != nil {
+		endFrame := &frame{Header: frameHeader{Type: "stream_end", ID: f.Header.ID}}
+		writeMu.Lock()
+		_ = writeFrame(r.conn, endFrame)
+		writeMu.Unlock()
+		return
+	}
+
+	handlerID := abi.HandlerID(f.Header.Metadata["handler_id"])
+	if handlerID == "" {
+		handlerID = abi.HandlerID(req.RoutePath)
+	}
+
+	streamCtx, cancel := context.WithCancel(context.Background())
+	inCh := make(chan []byte, 64)
+
+	r.streamsMu.Lock()
+	r.activeStreams[f.Header.ID] = cancel
+	r.activeInChans[f.Header.ID] = inCh
+	r.streamsMu.Unlock()
+
+	defer func() {
+		r.streamsMu.Lock()
+		delete(r.activeStreams, f.Header.ID)
+		delete(r.activeInChans, f.Header.ID)
+		r.streamsMu.Unlock()
+
+		endFrame := &frame{Header: frameHeader{Type: "stream_end", ID: f.Header.ID}}
+		writeMu.Lock()
+		_ = writeFrame(r.conn, endFrame)
+		writeMu.Unlock()
+	}()
+
+	sink := &workerStreamSink{
+		id:      f.Header.ID,
+		conn:    r.conn,
+		writeMu: writeMu,
+		ctx:     streamCtx,
+	}
+
+	r.handlersMu.RLock()
+	sHandler, hasStream := r.streamHandlers[handlerID]
+	handler, hasReq := r.handlers[handlerID]
+	r.handlersMu.RUnlock()
+
+	if hasStream {
+		_ = sHandler(streamCtx, &req, sink, inCh)
+	} else if hasReq {
+		resp, err := handler(&req)
+		if err == nil && resp != nil && len(resp.Body) > 0 {
+			_ = sink.Send(resp.Body)
+		}
+	}
+}
+
+func (r *Runtime) handleStreamData(f *frame) {
+	r.streamsMu.Lock()
+	inCh, ok := r.activeInChans[f.Header.ID]
+	r.streamsMu.Unlock()
+
+	if ok && inCh != nil {
+		select {
+		case inCh <- f.Body:
+		default:
+		}
+	}
+}
+
+func (r *Runtime) handleStreamCancel(f *frame) {
+	r.streamsMu.Lock()
+	cancel, ok := r.activeStreams[f.Header.ID]
+	r.streamsMu.Unlock()
+
+	if ok && cancel != nil {
+		cancel()
+	}
+}
+
+type workerStreamSink struct {
+	id      string
+	conn    net.Conn
+	writeMu *sync.Mutex
+	ctx     context.Context
+}
+
+func (s *workerStreamSink) Send(data any) error {
+	select {
+	case <-s.ctx.Done():
+		return s.ctx.Err()
+	default:
+	}
+
+	var b []byte
+	switch v := data.(type) {
+	case []byte:
+		b = v
+	case string:
+		b = []byte(v)
+	default:
+		var err error
+		b, err = json.Marshal(v)
+		if err != nil {
+			return err
+		}
+	}
+
+	f := &frame{
+		Header: frameHeader{Type: "stream_data", ID: s.id},
+		Body:   b,
+	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	return writeFrame(s.conn, f)
+}
+
+func (s *workerStreamSink) Close() error {
+	return nil
 }
 
 func (r *Runtime) dispatch(f *frame) *frame {
@@ -1387,6 +1646,14 @@ func (r *Runtime) Drain(ctx context.Context, timeout time.Duration) error {
 	if !r.draining.CompareAndSwap(false, true) {
 		return nil
 	}
+
+	r.streamsMu.Lock()
+	for _, cancel := range r.activeStreams {
+		if cancel != nil {
+			cancel()
+		}
+	}
+	r.streamsMu.Unlock()
 
 	deadline := time.Now().Add(timeout)
 	for r.inFlight.Load() > 0 && time.Now().Before(deadline) {

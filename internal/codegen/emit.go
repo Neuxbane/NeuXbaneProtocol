@@ -116,6 +116,7 @@ func EmitGeneratedRoutesWithPackage(pkgName, modulePath, buildID string, items [
 	buf.WriteString("\t_ = rest.NewCtx\n")
 	buf.WriteString("\t_ = files.NewDownloadCtx\n")
 	buf.WriteString("\t_ = ws.NewCtx\n")
+	buf.WriteString("\t_ = ws.NewStreamCtx\n")
 	buf.WriteString("\t_ = rtc.NewSessionCtx\n")
 	buf.WriteString("\t_ = mqtt.NewCtx[any, any]\n")
 	buf.WriteString("\t_ = worker.Runtime{}\n")
@@ -226,10 +227,18 @@ func EmitGeneratedRoutesWithPackage(pkgName, modulePath, buildID string, items [
 			buf.WriteString(fmt.Sprintf("\t\tres, err := %s.%s(ctx)\n", alias, fnName))
 		case domain == "ws":
 			buf.WriteString("\t\tctx := ws.NewCtx(context.Background(), req, nil, nil)\n")
-			buf.WriteString(fmt.Sprintf("\t\tres, err := %s.%s(ctx)\n", alias, fnName))
+			if item.HandlerInfo != nil && item.HandlerInfo.ReturnsErrorOnly {
+				buf.WriteString(fmt.Sprintf("\t\terr := %s.%s(ctx)\n", alias, fnName))
+			} else {
+				buf.WriteString(fmt.Sprintf("\t\tres, err := %s.%s(ctx)\n", alias, fnName))
+			}
 		case domain == "rtc":
 			buf.WriteString("\t\tctx := rtc.NewSessionCtx(context.Background(), req, nil)\n")
-			buf.WriteString(fmt.Sprintf("\t\tres, err := %s.%s(ctx)\n", alias, fnName))
+			if item.HandlerInfo != nil && item.HandlerInfo.ReturnsErrorOnly {
+				buf.WriteString(fmt.Sprintf("\t\terr := %s.%s(ctx)\n", alias, fnName))
+			} else {
+				buf.WriteString(fmt.Sprintf("\t\tres, err := %s.%s(ctx)\n", alias, fnName))
+			}
 		case domain == "mqtt":
 			if len(typeArgs) >= 2 {
 				buf.WriteString(fmt.Sprintf("\t\tctx := mqtt.NewCtx[%s.%s, %s.%s](context.Background(), req, nil)\n", alias, typeArgs[0], alias, typeArgs[1]))
@@ -244,10 +253,69 @@ func EmitGeneratedRoutesWithPackage(pkgName, modulePath, buildID string, items [
 		buf.WriteString("\t\tif err != nil {\n")
 		buf.WriteString("\t\t\treturn abi.NewErrorResponse(err), nil\n")
 		buf.WriteString("\t\t}\n")
-		if domain == "rest" || domain == "" {
+		if item.HandlerInfo != nil && item.HandlerInfo.ReturnsErrorOnly {
+			buf.WriteString("\t\treturn abi.NewResponse(204, nil), nil\n")
+		} else if domain == "rest" || domain == "" {
 			buf.WriteString("\t\treturn abi.NewAutoResponse(ctx.Response(), 200, res)\n")
 		} else {
 			buf.WriteString("\t\treturn abi.NewAutoResponse(nil, 200, res)\n")
+		}
+		buf.WriteString("\t},\n")
+	}
+	buf.WriteString("}\n\n")
+
+	// GeneratedStreamRegistry map
+	buf.WriteString("// GeneratedStreamRegistry maps every streaming HandlerID to an executable worker streaming adapter.\n")
+	buf.WriteString("var GeneratedStreamRegistry = map[abi.HandlerID]worker.StreamHandlerFunc{\n")
+	for _, item := range items {
+		isStream := (item.Route.Shape != nil && item.Route.Shape.ShapeKind() == abi.ShapeKindStream) ||
+			(item.HandlerInfo != nil && item.HandlerInfo.ReturnsErrorOnly)
+
+		if !isStream {
+			continue
+		}
+
+		alias := aliasMap[item.FileRoute.FilePath]
+		fnName := "Handler"
+		domain := "ws"
+		if item.HandlerInfo != nil {
+			if item.HandlerInfo.FunctionName != "" {
+				fnName = item.HandlerInfo.FunctionName
+			}
+			if item.HandlerInfo.Domain != "" {
+				domain = item.HandlerInfo.Domain
+			}
+		}
+
+		buf.WriteString(fmt.Sprintf("\t%q: func(ctx context.Context, req *abi.Request, sink abi.StreamSink, in <-chan []byte) error {\n", item.Route.ID))
+		for _, gid := range item.Route.Guards {
+			buf.WriteString(fmt.Sprintf("\t\tif g, ok := GeneratedGuards[%q]; ok {\n", gid))
+			buf.WriteString("\t\t\tif err := g(req); err != nil {\n")
+			buf.WriteString("\t\t\t\treturn err\n")
+			buf.WriteString("\t\t\t}\n")
+			buf.WriteString("\t\t}\n")
+		}
+
+		switch domain {
+		case "rtc":
+			buf.WriteString("\t\tsessionCtx := rtc.NewSessionCtx(ctx, req, nil)\n")
+			buf.WriteString("\t\tsessionCtx.SetSink(sink)\n")
+			if item.HandlerInfo != nil && item.HandlerInfo.ReturnsErrorOnly {
+				buf.WriteString(fmt.Sprintf("\t\treturn %s.%s(sessionCtx)\n", alias, fnName))
+			} else {
+				buf.WriteString(fmt.Sprintf("\t\tres, err := %s.%s(sessionCtx)\n", alias, fnName))
+				buf.WriteString("\t\tif err != nil { return err }\n")
+				buf.WriteString("\t\treturn sink.Send(res)\n")
+			}
+		default:
+			buf.WriteString("\t\twsCtx := ws.NewStreamCtx(ctx, req, sink, in)\n")
+			if item.HandlerInfo != nil && item.HandlerInfo.ReturnsErrorOnly {
+				buf.WriteString(fmt.Sprintf("\t\treturn %s.%s(wsCtx)\n", alias, fnName))
+			} else {
+				buf.WriteString(fmt.Sprintf("\t\tres, err := %s.%s(wsCtx)\n", alias, fnName))
+				buf.WriteString("\t\tif err != nil { return err }\n")
+				buf.WriteString("\t\treturn sink.Send(res)\n")
+			}
 		}
 		buf.WriteString("\t},\n")
 	}
@@ -400,6 +468,9 @@ func main() {
 	for _, route := range GeneratedRoutes {
 		if handler, ok := GeneratedRegistry[route.ID]; ok {
 			w.RegisterHandler(route, handler)
+		}
+		if sHandler, ok := GeneratedStreamRegistry[route.ID]; ok {
+			w.RegisterStreamHandler(route, sHandler)
 		}
 	}
 

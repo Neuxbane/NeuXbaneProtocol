@@ -61,3 +61,10 @@ func AllAdapters() []Adapter {
 
 // DispatcherFunc defines the handler invocation callback for adapters.
 type DispatcherFunc func(ctx context.Context, req *abi.Request) (*abi.Response, error)
+
+// StreamSink defines an outbound event/message sink for streaming transports.
+type StreamSink = abi.StreamSink
+
+// StreamDispatcherFunc defines the streaming handler invocation callback for adapters.
+type StreamDispatcherFunc func(ctx context.Context, req *abi.Request, sink StreamSink, in <-chan []byte) error
+

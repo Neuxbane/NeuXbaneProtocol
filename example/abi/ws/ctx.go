@@ -7,4 +7,7 @@ type (
 	Ctx   = abi.WsCtx
 )
 
-var NewCtx = abi.NewWsCtx
+var (
+	NewCtx       = abi.NewWsCtx
+	NewStreamCtx = abi.NewWsStreamCtx
+)

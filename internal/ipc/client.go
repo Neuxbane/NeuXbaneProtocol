@@ -16,6 +16,8 @@ type Client struct {
 	writeMu   sync.Mutex
 	pending   map[string]chan *Frame
 	pendingMu sync.RWMutex
+	streams   map[string]chan *Frame
+	streamsMu sync.RWMutex
 	closed    atomic.Bool
 	closeChan chan struct{}
 }
@@ -43,6 +45,7 @@ func NewClient(conn net.Conn) *Client {
 	c := &Client{
 		conn:      conn,
 		pending:   make(map[string]chan *Frame),
+		streams:   make(map[string]chan *Frame),
 		closeChan: make(chan struct{}),
 	}
 	go c.readLoop()
@@ -57,6 +60,22 @@ func (c *Client) Send(frame *Frame) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
 	return WriteFrame(c.conn, frame)
+}
+
+// RegisterStream registers an active streaming session by frame ID.
+// Returns a receive channel and an unregister callback.
+func (c *Client) RegisterStream(id string) (<-chan *Frame, func()) {
+	ch := make(chan *Frame, 64)
+	c.streamsMu.Lock()
+	c.streams[id] = ch
+	c.streamsMu.Unlock()
+
+	cleanup := func() {
+		c.streamsMu.Lock()
+		delete(c.streams, id)
+		c.streamsMu.Unlock()
+	}
+	return ch, cleanup
 }
 
 // RoundTrip sends a request frame and awaits the matching response frame correlated by ID.
@@ -111,6 +130,19 @@ func (c *Client) readLoop() {
 			select {
 			case ch <- frame:
 			default:
+			}
+			continue
+		}
+
+		// Correlate with active stream session if any
+		c.streamsMu.RLock()
+		streamCh, streamExists := c.streams[frame.Header.ID]
+		c.streamsMu.RUnlock()
+
+		if streamExists && streamCh != nil {
+			select {
+			case streamCh <- frame:
+			case <-c.closeChan:
 			}
 		}
 	}

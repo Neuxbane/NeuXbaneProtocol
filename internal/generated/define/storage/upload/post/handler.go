@@ -1,3 +1,4 @@
+// @guard
 // @desc Upload a file to storage
 package post
 

@@ -171,6 +171,11 @@ func (m *Mother) Dispatch(ctx context.Context, req *abi.Request) (*abi.Response,
 	return m.supervisor.Dispatch(ctx, req)
 }
 
+// DispatchStream forwards an inbound streaming request through the supervisor to the worker.
+func (m *Mother) DispatchStream(ctx context.Context, req *abi.Request, sink abi.StreamSink, in <-chan []byte) error {
+	return m.supervisor.DispatchStream(ctx, req, sink, in)
+}
+
 // Shutdown drains all workers and terminates background tasks.
 func (m *Mother) Shutdown(ctx context.Context) error {
 	telemetry.LogService("mother", "shutting down mother process, draining workers...")

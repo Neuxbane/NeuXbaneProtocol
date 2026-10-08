@@ -1,3 +1,4 @@
+// @guard
 // @desc Create a new item
 package post
 

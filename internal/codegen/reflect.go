@@ -21,7 +21,8 @@ type HandlerInfo struct {
 	TypeArgs     []string
 	IsGeneric    bool
 	InputSchema  *abi.Schema
-	ResultSchema *abi.Schema
+	ResultSchema     *abi.Schema
+	ReturnsErrorOnly bool
 }
 
 // InspectHandlerSource parses a Go source file and extracts the exported Handler declaration.
@@ -375,30 +376,50 @@ func parseFuncSignature(fn *ast.FuncDecl) *HandlerInfo {
 		}
 	}
 
-	// 2. Inspect return types: (Result, error)
+	// 2. Inspect return types: (Result, error) or (error)
 	resultType := ""
+	returnsErrorOnly := false
 	if fn.Type.Results != nil && len(fn.Type.Results.List) > 0 {
-		firstRet := fn.Type.Results.List[0]
-		switch ret := firstRet.Type.(type) {
-		case *ast.Ident:
-			resultType = ret.Name
-		case *ast.SelectorExpr:
-			resultType = ret.Sel.Name
-		case *ast.StarExpr:
-			if ident, ok := ret.X.(*ast.Ident); ok {
-				resultType = "*" + ident.Name
+		if len(fn.Type.Results.List) == 1 {
+			firstRet := fn.Type.Results.List[0]
+			if ident, ok := firstRet.Type.(*ast.Ident); ok && ident.Name == "error" {
+				returnsErrorOnly = true
+			} else {
+				switch ret := firstRet.Type.(type) {
+				case *ast.Ident:
+					resultType = ret.Name
+				case *ast.SelectorExpr:
+					resultType = ret.Sel.Name
+				case *ast.StarExpr:
+					if ident, ok := ret.X.(*ast.Ident); ok {
+						resultType = "*" + ident.Name
+					}
+				}
+			}
+		} else {
+			firstRet := fn.Type.Results.List[0]
+			switch ret := firstRet.Type.(type) {
+			case *ast.Ident:
+				resultType = ret.Name
+			case *ast.SelectorExpr:
+				resultType = ret.Sel.Name
+			case *ast.StarExpr:
+				if ident, ok := ret.X.(*ast.Ident); ok {
+					resultType = "*" + ident.Name
+				}
 			}
 		}
 	}
 
 	return &HandlerInfo{
-		FunctionName: fn.Name.Name,
-		Domain:       domain,
-		TypeName:     typeName,
-		InputType:    inputType,
-		ResultType:   resultType,
-		TypeArgs:     typeArgs,
-		IsGeneric:    isGeneric,
+		FunctionName:     fn.Name.Name,
+		Domain:           domain,
+		TypeName:         typeName,
+		InputType:        inputType,
+		ResultType:       resultType,
+		TypeArgs:         typeArgs,
+		IsGeneric:        isGeneric,
+		ReturnsErrorOnly: returnsErrorOnly,
 	}
 }
 
@@ -422,12 +443,51 @@ func buildRouteMetadata(d *Directives) map[string]string {
 
 // BuildShape constructs an abi.Shape based on transport, directives, and handler types.
 func BuildShape(transport abi.Transport, d *Directives, info *HandlerInfo) abi.Shape {
+	if d != nil {
+		if d.Shape == "stream" || (d.Stream && (d.StreamContract == nil || d.StreamContract["action"] != "poll")) {
+			return abi.StreamShape{
+				Partitions:    d.Partitions,
+				ConsumerGroup: d.Group,
+			}
+		}
+		if d.Shape == "pubsub" {
+			topics := make(map[string]string)
+			if d.Topic != "" {
+				topics["default"] = d.Topic
+			}
+			return abi.PubSubShape{
+				Topics: topics,
+				QoS:    d.QoS,
+				Retain: d.Retain,
+			}
+		}
+		if d.Shape == "frames" {
+			return abi.FramesShape{
+				In:  &abi.Schema{Type: "string"},
+				Out: &abi.Schema{Type: "string"},
+			}
+		}
+		if d.Shape == "datagram" {
+			return abi.DatagramShape{
+				MaxSize:  1024,
+				Response: abi.DatagramResponseEcho,
+			}
+		}
+	}
+
+	// Handlers returning error only on WebSocket or SSE are streaming
+	if info != nil && info.ReturnsErrorOnly && (transport == abi.TransportWebSocket || transport == abi.TransportSSE) {
+		return abi.StreamShape{}
+	}
+
 	switch transport {
 	case abi.TransportWebSocket, abi.TransportWebRTC:
 		return abi.FramesShape{
 			In:  &abi.Schema{Type: "string"},
 			Out: &abi.Schema{Type: "string"},
 		}
+	case abi.TransportSSE:
+		return abi.StreamShape{}
 	case abi.TransportUDP:
 		return abi.DatagramShape{
 			MaxSize:  1024,

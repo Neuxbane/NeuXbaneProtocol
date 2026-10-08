@@ -13,6 +13,7 @@ import (
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/runtime"
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/telemetry"
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/transport/rest"
+	"github.com/Neuxbane/NeuXbaneProtocol/internal/transport/sse"
 	"github.com/Neuxbane/NeuXbaneProtocol/internal/transport/websocket"
 )
 
@@ -54,7 +55,13 @@ func main() {
 	// detects "Upgrade: websocket" handshakes and delegates them here, so both
 	// transports are served on the same port.
 	wsAdapter := websocket.NewAdapter(mother.Dispatch)
+	wsAdapter.SetStreamDispatcher(mother.DispatchStream)
 	restAdapter.SetWebSocketHandler(wsAdapter.Handler(mother.Table()))
+
+	// Mount SSE adapter. It shares the REST listener as well.
+	sseAdapter := sse.NewAdapter(mother.Dispatch)
+	sseAdapter.SetStreamDispatcher(mother.DispatchStream)
+	restAdapter.SetSSEHandler(sseAdapter.Handler(mother.Table()))
 
 	listener, err := net.Listen("tcp", cfg.Addr)
 	if err != nil {

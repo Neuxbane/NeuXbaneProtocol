@@ -5,11 +5,13 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -40,11 +42,12 @@ type Session struct {
 
 // Adapter implements transport.Adapter for duplex WebSockets.
 type Adapter struct {
-	dispatcher transport.DispatcherFunc
-	server     *http.Server
-	table      *router.Table
-	sessions   map[string]*Session
-	sessionsMu sync.RWMutex
+	dispatcher       transport.DispatcherFunc
+	streamDispatcher transport.StreamDispatcherFunc
+	server           *http.Server
+	table            *router.Table
+	sessions         map[string]*Session
+	sessionsMu       sync.RWMutex
 }
 
 // NewAdapter constructs an initialized WebSocket transport adapter.
@@ -58,6 +61,11 @@ func NewAdapter(dispatcher transport.DispatcherFunc) *Adapter {
 // SetDispatcher sets the worker request dispatch callback.
 func (a *Adapter) SetDispatcher(fn transport.DispatcherFunc) {
 	a.dispatcher = fn
+}
+
+// SetStreamDispatcher sets the streaming request dispatch callback.
+func (a *Adapter) SetStreamDispatcher(fn transport.StreamDispatcherFunc) {
+	a.streamDispatcher = fn
 }
 
 // Name implements transport.Adapter.
@@ -152,8 +160,62 @@ func (a *Adapter) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		a.sessionsMu.Unlock()
 	}
 
+	connCtx, cancelConn := context.WithCancel(r.Context())
+	defer cancelConn()
+
+	type wsOutMsg struct {
+		msgType int
+		data    []byte
+	}
+
+	outChan := make(chan wsOutMsg, 256)
+	var writeClosed atomic.Bool
+	var writeWg sync.WaitGroup
+	writeWg.Add(1)
+
+	// Outbound write pump goroutine ensuring thread-safe serialized writes to wsConn
+	go func() {
+		defer writeWg.Done()
+		ticker := time.NewTicker(20 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case msg, ok := <-outChan:
+				if !ok {
+					_ = wsConn.WriteMessage(websocket.CloseMessage, []byte{})
+					return
+				}
+				_ = wsConn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				if err := wsConn.WriteMessage(msg.msgType, msg.data); err != nil {
+					return
+				}
+			case <-ticker.C:
+				_ = wsConn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				if err := wsConn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					return
+				}
+			case <-connCtx.Done():
+				return
+			}
+		}
+	}()
+
+	writeOut := func(msgType int, data []byte) error {
+		if writeClosed.Load() {
+			return fmt.Errorf("websocket connection closed")
+		}
+		select {
+		case <-connCtx.Done():
+			return connCtx.Err()
+		case outChan <- wsOutMsg{msgType: msgType, data: data}:
+			return nil
+		}
+	}
+
 	// Send initial handshake frame with token
-	_ = wsConn.WriteJSON(map[string]string{"type": "connected", "token": token})
+	connectedBytes, _ := json.Marshal(map[string]string{"type": "connected", "token": token})
+	_ = writeOut(websocket.TextMessage, connectedBytes)
 
 	// Heartbeat setup
 	wsConn.SetPongHandler(func(string) error {
@@ -161,64 +223,99 @@ func (a *Adapter) handleUpgrade(w http.ResponseWriter, r *http.Request) {
 		return nil
 	})
 
-	// Ping ticker
-	ticker := time.NewTicker(20 * time.Second)
-	defer ticker.Stop()
+	isStream := entry.Route.Shape != nil && entry.Route.Shape.ShapeKind() == abi.ShapeKindStream
+	clientInChan := make(chan []byte, 64)
 
-	stopChan := make(chan struct{})
-	go func() {
-		for {
-			select {
-			case <-ticker.C:
-				if err := wsConn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
-					return
+	sink := &wsStreamSink{
+		sendFn: func(data any) error {
+			var b []byte
+			switch v := data.(type) {
+			case []byte:
+				b = v
+			case string:
+				b = []byte(v)
+			default:
+				var err error
+				b, err = json.Marshal(v)
+				if err != nil {
+					return err
 				}
-			case <-stopChan:
-				return
 			}
-		}
-	}()
+			return writeOut(websocket.TextMessage, b)
+		},
+	}
 
-	// Read loop with backpressure
+	// For streaming routes, invoke the handler immediately on connection upgrade
+	if isStream {
+		go func() {
+			if a.streamDispatcher != nil {
+				_ = a.streamDispatcher(connCtx, abiReq, sink, clientInChan)
+			} else if a.dispatcher != nil {
+				resp, err := a.dispatcher(connCtx, abiReq)
+				if err == nil && resp != nil && len(resp.Body) > 0 {
+					_ = writeOut(websocket.TextMessage, resp.Body)
+				}
+			}
+		}()
+	}
+
+	// Inbound read loop
 	for {
 		_ = wsConn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		msgType, msg, err := wsConn.ReadMessage()
 		if err != nil {
-			close(stopChan)
-			return
+			cancelConn()
+			break
 		}
 
 		if msgType == websocket.TextMessage || msgType == websocket.BinaryMessage {
-			// Each frame is dispatched as its own request. Carry over the
-			// handshake context (headers, query, params, identity) so that
-			// guards and handlers see the same authenticated caller that was
-			// established during the upgrade. Without this, cookie/bearer
-			// auth would succeed on the handshake but fail on every frame.
-			//
-			// The method must match the route's registered method ("CONNECT")
-			// so the router resolves the same handler that served the upgrade.
-			msgReq := abi.NewRequest(abi.TransportWebSocket, "CONNECT", r.URL.Path)
-			msgReq.RoutePath = abiReq.RoutePath
-			msgReq.Body = msg
-			for k, v := range abiReq.Headers {
-				msgReq.Headers[k] = v
-			}
-			for k, v := range abiReq.Query {
-				msgReq.Query[k] = v
-			}
-			for k, v := range abiReq.Params {
-				msgReq.Params[k] = v
-			}
-			msgReq.Identity = abiReq.Identity
+			if isStream {
+				select {
+				case clientInChan <- msg:
+				case <-connCtx.Done():
+					break
+				}
+			} else {
+				// Each frame is dispatched as its own request for frame-by-frame RPC routes.
+				msgReq := abi.NewRequest(abi.TransportWebSocket, "CONNECT", r.URL.Path)
+				msgReq.RoutePath = abiReq.RoutePath
+				msgReq.Body = msg
+				for k, v := range abiReq.Headers {
+					msgReq.Headers[k] = v
+				}
+				for k, v := range abiReq.Query {
+					msgReq.Query[k] = v
+				}
+				for k, v := range abiReq.Params {
+					msgReq.Params[k] = v
+				}
+				msgReq.Identity = abiReq.Identity
 
-			if a.dispatcher != nil {
-				resp, err := a.dispatcher(r.Context(), msgReq)
-				if err == nil && resp != nil && len(resp.Body) > 0 {
-					_ = wsConn.WriteMessage(websocket.TextMessage, resp.Body)
+				if a.dispatcher != nil {
+					resp, err := a.dispatcher(connCtx, msgReq)
+					if err == nil && resp != nil && len(resp.Body) > 0 {
+						_ = writeOut(websocket.TextMessage, resp.Body)
+					}
 				}
 			}
 		}
 	}
+
+	writeClosed.Store(true)
+	close(outChan)
+	writeWg.Wait()
+}
+
+type wsStreamSink struct {
+	sendFn func(data any) error
+}
+
+func (s *wsStreamSink) Send(data any) error {
+	return s.sendFn(data)
+}
+
+func (s *wsStreamSink) Close() error {
+	return nil
 }
 
 // Shutdown stops the WebSocket server.

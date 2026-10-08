@@ -1,3 +1,4 @@
+// @guard
 // @desc Framework welcome endpoint
 package get
 

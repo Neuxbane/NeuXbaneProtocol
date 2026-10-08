@@ -259,6 +259,96 @@ func (s *Supervisor) Dispatch(ctx context.Context, req *abi.Request) (*abi.Respo
 	return &resp, nil
 }
 
+// DispatchStream forwards an incoming streaming request to the worker process.
+func (s *Supervisor) DispatchStream(ctx context.Context, req *abi.Request, sink abi.StreamSink, in <-chan []byte) error {
+	// 1. Look up route in routing table
+	entry, params, ok := s.table.Load(req.Transport, req.Method, req.Path)
+	if !ok {
+		return errors.ErrNotFound
+	}
+
+	req.RoutePath = entry.Route.Path
+	if len(params) > 0 {
+		if req.Params == nil {
+			req.Params = make(map[string]string)
+		}
+		for k, v := range params {
+			req.Params[k] = v
+		}
+	}
+
+	// 2. Locate worker instance
+	inst, ok := s.registry.Get(entry.WorkerName)
+	if !ok || inst.Client == nil || inst.Draining {
+		return errors.New(errors.CodeContractWorkerUnavailable, "worker unavailable", 503)
+	}
+
+	// 3. Serialize request and send over IPC
+	reqBytes, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal request for worker: %w", err)
+	}
+
+	streamID := req.ID
+	if streamID == "" {
+		streamID = fmt.Sprintf("stream-%d", time.Now().UnixNano())
+		req.ID = streamID
+	}
+
+	streamCh, unregister := inst.Client.RegisterStream(streamID)
+	defer unregister()
+
+	startFrame := ipc.NewFrame(ipc.FrameTypeStreamStart, streamID, reqBytes)
+	startFrame.Header.Metadata["handler_id"] = string(entry.Route.ID)
+	startFrame.Header.Metadata["transport"] = string(req.Transport)
+
+	if err := inst.Client.Send(startFrame); err != nil {
+		return fmt.Errorf("send stream start frame: %w", err)
+	}
+
+	// Forward client inbound frames if any
+	if in != nil {
+		go func() {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case data, ok := <-in:
+					if !ok {
+						return
+					}
+					dataFrame := ipc.NewFrame(ipc.FrameTypeStreamData, streamID, data)
+					_ = inst.Client.Send(dataFrame)
+				}
+			}
+		}()
+	}
+
+	defer func() {
+		cancelFrame := ipc.NewFrame(ipc.FrameTypeStreamCancel, streamID, nil)
+		_ = inst.Client.Send(cancelFrame)
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case frame, ok := <-streamCh:
+			if !ok {
+				return nil
+			}
+			switch frame.Header.Type {
+			case ipc.FrameTypeStreamData:
+				if err := sink.Send(frame.Body); err != nil {
+					return err
+				}
+			case ipc.FrameTypeStreamEnd:
+				return nil
+			}
+		}
+	}
+}
+
 // DrainAll drains all active workers during mother shutdown.
 func (s *Supervisor) DrainAll(ctx context.Context) error {
 	workers := s.registry.All()

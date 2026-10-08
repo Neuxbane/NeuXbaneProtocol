@@ -22,10 +22,11 @@ func init() {
 
 // Adapter implements transport.Adapter for WebRTC signaling and media channels.
 type Adapter struct {
-	dispatcher transport.DispatcherFunc
-	server     *http.Server
-	table      *router.Table
-	mu         sync.RWMutex
+	dispatcher       transport.DispatcherFunc
+	streamDispatcher transport.StreamDispatcherFunc
+	server           *http.Server
+	table            *router.Table
+	mu               sync.RWMutex
 }
 
 // NewAdapter constructs an initialized WebRTC Adapter.
@@ -37,7 +38,16 @@ func NewAdapter(dispatcher transport.DispatcherFunc) *Adapter {
 
 // SetDispatcher sets the worker dispatcher callback.
 func (a *Adapter) SetDispatcher(fn transport.DispatcherFunc) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
 	a.dispatcher = fn
+}
+
+// SetStreamDispatcher sets the streaming request dispatch callback.
+func (a *Adapter) SetStreamDispatcher(fn transport.StreamDispatcherFunc) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.streamDispatcher = fn
 }
 
 // Name implements transport.Adapter.

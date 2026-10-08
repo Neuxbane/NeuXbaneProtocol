@@ -32,6 +32,7 @@ type SessionCtx struct {
 	req         *abi.Request
 	peer        Peer
 	permissions map[string]bool
+	sink        abi.StreamSink
 }
 
 // NewSessionCtx constructs an initialized SessionCtx.
@@ -45,6 +46,19 @@ func NewSessionCtx(parent context.Context, req *abi.Request, peer Peer) *Session
 		peer:        peer,
 		permissions: make(map[string]bool),
 	}
+}
+
+// SetSink attaches an outbound StreamSink to the session.
+func (c *SessionCtx) SetSink(sink abi.StreamSink) {
+	c.sink = sink
+}
+
+// Send transmits data down the WebRTC data channel or signaling channel.
+func (c *SessionCtx) Send(data any) error {
+	if c.sink != nil {
+		return c.sink.Send(data)
+	}
+	return nil
 }
 
 // Param returns a path parameter from signaling.
