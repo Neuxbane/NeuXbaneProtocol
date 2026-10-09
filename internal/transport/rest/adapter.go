@@ -248,6 +248,7 @@ func (a *Adapter) Render(w io.Writer, resp *abi.Response, ctx transport.RenderCt
 				Name:     "xm_session",
 				Value:    tokenDetector.Token,
 				Path:     "/",
+				MaxAge:   86400 * 30, // 30 days
 				HttpOnly: true,
 				SameSite: http.SameSiteLaxMode,
 			}

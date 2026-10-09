@@ -23,16 +23,16 @@ import (
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/rtc"
 	"github.com/Neuxbane/NeuXbaneProtocol/nxp/ws"
 
-	pkg_0 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/auth/get"
-	pkg_1 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/chat/room/ws"
-	pkg_2 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/get"
-	pkg_3 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/items/_id/get"
-	pkg_4 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/items/post"
-	pkg_5 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/meet/room/rtc"
-	pkg_6 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/sensors/telemetry/mqtt"
-	pkg_7 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/storage/download/get"
-	pkg_8 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/storage/upload/post"
-	pkg_9 "github.com/Neuxbane/NeuXbaneProtocol/internal/generated/define/stream/ws"
+	pkg_0 "github.com/Neuxbane/NeuXbaneProtocol/.nxp/worker/define/auth/get"
+	pkg_1 "github.com/Neuxbane/NeuXbaneProtocol/.nxp/worker/define/chat/room/ws"
+	pkg_2 "github.com/Neuxbane/NeuXbaneProtocol/.nxp/worker/define/get"
+	pkg_3 "github.com/Neuxbane/NeuXbaneProtocol/.nxp/worker/define/items/_id/get"
+	pkg_4 "github.com/Neuxbane/NeuXbaneProtocol/.nxp/worker/define/items/post"
+	pkg_5 "github.com/Neuxbane/NeuXbaneProtocol/.nxp/worker/define/meet/room/rtc"
+	pkg_6 "github.com/Neuxbane/NeuXbaneProtocol/.nxp/worker/define/sensors/telemetry/mqtt"
+	pkg_7 "github.com/Neuxbane/NeuXbaneProtocol/.nxp/worker/define/storage/download/get"
+	pkg_8 "github.com/Neuxbane/NeuXbaneProtocol/.nxp/worker/define/storage/upload/post"
+	pkg_9 "github.com/Neuxbane/NeuXbaneProtocol/.nxp/worker/define/stream/ws"
 )
 
 // Silence unused domain import warnings.
