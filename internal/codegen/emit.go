@@ -82,13 +82,22 @@ func EmitGeneratedRoutesWithPackage(pkgName, modulePath, buildID string, items [
 		buf.WriteString("\t\"github.com/Neuxbane/NeuXbaneProtocol/internal/worker\"\n\n")
 	}
 
+	absBase, _ := filepath.Abs(".")
+
 	// Import each handler package
 	aliasMap := make(map[string]string)
 	for i, item := range items {
 		pkgDir := item.FileRoute.PackagePath
-		rel, _ := filepath.Rel(".", pkgDir)
+		absPkg, _ := filepath.Abs(pkgDir)
+		rel, err := filepath.Rel(absBase, absPkg)
+		if err != nil || rel == "." {
+			rel = ""
+		}
 		rel = filepath.ToSlash(rel)
-		importPath := modulePath + "/" + rel
+		importPath := modulePath
+		if rel != "" {
+			importPath = modulePath + "/" + rel
+		}
 		alias := fmt.Sprintf("pkg_%d", i)
 		aliasMap[item.FileRoute.FilePath] = alias
 		buf.WriteString(fmt.Sprintf("\t%s %q\n", alias, importPath))
@@ -97,9 +106,16 @@ func EmitGeneratedRoutesWithPackage(pkgName, modulePath, buildID string, items [
 	// Import each guard package
 	guardAliasMap := make(map[string]string)
 	for i, g := range guards {
-		rel, _ := filepath.Rel(".", g.PackagePath)
+		absPkg, _ := filepath.Abs(g.PackagePath)
+		rel, err := filepath.Rel(absBase, absPkg)
+		if err != nil || rel == "." {
+			rel = ""
+		}
 		rel = filepath.ToSlash(rel)
-		importPath := modulePath + "/" + rel
+		importPath := modulePath
+		if rel != "" {
+			importPath = modulePath + "/" + rel
+		}
 		alias := fmt.Sprintf("guard_%d", i)
 		guardAliasMap[g.ID] = alias
 		buf.WriteString(fmt.Sprintf("\t%s %q\n", alias, importPath))
@@ -361,18 +377,35 @@ func emitShapeCode(shape abi.Shape) string {
 func GenerateProject(defineDir, modulePath, outputGenFile, buildIDFile string) (string, error) {
 	// Stage the authoring tree so "@param" segments compile (see StageDefineTree).
 	stageDir := filepath.Join(filepath.Dir(outputGenFile), "define")
-	if _, err := StageDefineTree(defineDir, stageDir); err != nil {
+	origToStaged, err := StageDefineTree(defineDir, stageDir)
+	if err != nil {
 		return "", fmt.Errorf("stage define tree: %w", err)
 	}
 
-	fileRoutes, err := WalkDefineTree(stageDir)
+	fileRoutes, err := WalkDefineTree(defineDir)
 	if err != nil {
 		return "", fmt.Errorf("walk define tree: %w", err)
 	}
 
-	guards, err := WalkGuards(stageDir)
+	guards, err := WalkGuards(defineDir)
 	if err != nil {
 		return "", fmt.Errorf("walk guards: %w", err)
+	}
+
+	for i := range fileRoutes {
+		absOrig, _ := filepath.Abs(fileRoutes[i].FilePath)
+		if stagedPath, ok := origToStaged[absOrig]; ok {
+			fileRoutes[i].PackagePath = filepath.Dir(stagedPath)
+			fileRoutes[i].PackageName = sanitizePackageName(filepath.Base(fileRoutes[i].PackagePath))
+		}
+	}
+
+	for i := range guards {
+		absOrig, _ := filepath.Abs(guards[i].FilePath)
+		if stagedPath, ok := origToStaged[absOrig]; ok {
+			guards[i].PackagePath = filepath.Dir(stagedPath)
+			guards[i].PackageName = sanitizePackageName(filepath.Base(guards[i].PackagePath))
+		}
 	}
 
 	buildID, err := ComputeBuildID(defineDir)
@@ -488,18 +521,35 @@ func GenerateWorkerProject(defineDir, modulePath, workerDir, buildIDFile string)
 	// segments are authored as "@param" but Go import paths reject "@", so the
 	// staged tree renames them to "_param" and normalizes package clauses.
 	stageDir := filepath.Join(workerDir, "define")
-	if _, err := StageDefineTree(defineDir, stageDir); err != nil {
+	origToStaged, err := StageDefineTree(defineDir, stageDir)
+	if err != nil {
 		return "", fmt.Errorf("stage define tree: %w", err)
 	}
 
-	fileRoutes, err := WalkDefineTree(stageDir)
+	fileRoutes, err := WalkDefineTree(defineDir)
 	if err != nil {
 		return "", fmt.Errorf("walk define tree: %w", err)
 	}
 
-	guards, err := WalkGuards(stageDir)
+	guards, err := WalkGuards(defineDir)
 	if err != nil {
 		return "", fmt.Errorf("walk guards: %w", err)
+	}
+
+	for i := range fileRoutes {
+		absOrig, _ := filepath.Abs(fileRoutes[i].FilePath)
+		if stagedPath, ok := origToStaged[absOrig]; ok {
+			fileRoutes[i].PackagePath = filepath.Dir(stagedPath)
+			fileRoutes[i].PackageName = sanitizePackageName(filepath.Base(fileRoutes[i].PackagePath))
+		}
+	}
+
+	for i := range guards {
+		absOrig, _ := filepath.Abs(guards[i].FilePath)
+		if stagedPath, ok := origToStaged[absOrig]; ok {
+			guards[i].PackagePath = filepath.Dir(stagedPath)
+			guards[i].PackageName = sanitizePackageName(filepath.Base(guards[i].PackagePath))
+		}
 	}
 
 	buildID, err := ComputeBuildID(defineDir)

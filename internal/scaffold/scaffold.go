@@ -66,8 +66,7 @@ func EnsureDefine(defineDir string) error {
 		_ = os.WriteFile(guidePath, []byte(defineGuideDoc), 0644)
 	}
 
-	// 2. Ensure a starter root GET handler if define/ has no routes yet.
-	//    Supports bare method files (define/get.go -> GET /) and method folders (define/get/handler.go -> GET /).
+	// 2. Ensure a starter root GET handler if define/ has no routes yet (define/get.go -> GET /).
 	hasRoutes := false
 	_ = filepath.WalkDir(defineDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -1895,10 +1894,6 @@ A route is a **method file** named after the HTTP method (or transport):
 
 Method file names: ` + "`get.go`, `post.go`, `put.go`, `patch.go`, `delete.go`, `ws.go`, `grpc.go`, `udp.go`, `mqtt.go`, `nats.go`, `kafka.go`" + `.
 A ` + "`@name`" + ` folder (or ` + "`[name]`" + `) becomes a dynamic path parameter ` + "`{name}`" + `.
-
-> Alternative form: a **method folder** containing a ` + "`handler.go`" + ` is equivalent
-> (` + "`define/agents/get/handler.go`" + ` -> ` + "`GET /agents`" + `). Prefer the bare method file.
-> A legacy prefix file (` + "`define/get_user.go`" + ` -> ` + "`GET /user`" + `) is also accepted.
 
 ### Guards
 

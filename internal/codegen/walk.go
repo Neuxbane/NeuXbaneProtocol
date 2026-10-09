@@ -25,20 +25,20 @@ type FileRoute struct {
 }
 
 // ComputeRoutePath transforms a relative define file path to an API route path
-// according to the folder-routing convention:
+// according to the bare-method-file convention:
 //
 //   - Folders are path segments. "@x" (or staged "_x") -> "{x}".
-//   - A method folder (get/, post/, patch/, delete/, ws/, ...) is dropped from
-//     the path; the handler inside it is "handler.go".
 //   - A bare method filename (get.go, post.go, ...) is dropped from the path.
 //   - "index.go" is a guard implementation, never a route.
 //
 // Examples:
 //
-//	define/agents/get/handler.go     -> /agents
-//	define/agents/@id/get/handler.go -> /agents/{id}
+//	define/get.go                    -> /
+//	define/agents/get.go             -> /agents
 //	define/agents/@id/get.go         -> /agents/{id}
-//	define/chat/room/ws/handler.go   -> /chat/room
+//	define/agents/@id/patch.go       -> /agents/{id}
+//	define/chat/room/ws.go           -> /chat/room
+//	define/sensors/telemetry/mqtt.go -> /sensors/telemetry
 func ComputeRoutePath(relPath string) string {
 	clean := filepath.ToSlash(relPath)
 	clean = strings.TrimPrefix(clean, "define/")
@@ -52,17 +52,10 @@ func ComputeRoutePath(relPath string) string {
 		last := i == len(segments)-1
 
 		if last {
-			// The filename never contributes to the path. It is either a
-			// method name (get.go), the handler file (handler.go), or a guard
-			// (index.go).
-			if isMethodSegment(seg) || seg == "handler" || seg == "index" {
+			// The bare method filename never contributes to the path.
+			if isMethodSegment(seg) || seg == "index" {
 				continue
 			}
-			// Legacy prefix form: get_foo.go -> foo.
-			seg = stripMethodPrefix(seg)
-		} else if isMethodSegment(seg) {
-			// A method folder (get/, post/, ...) is not a path segment.
-			continue
 		}
 
 		// Convert [param] to {param}
@@ -132,81 +125,28 @@ func methodFromSegment(seg string) (abi.Transport, string, bool) {
 	return "", "", false
 }
 
-// InferTransportAndMethod extracts the transport and method for a handler file.
-// The method is taken from, in order of precedence:
+// InferTransportAndMethod extracts the transport and method for a bare method file.
+// The method is taken from the filename itself (get.go -> GET).
 //
-//  1. The parent folder name when it is a method folder (get/handler.go).
-//  2. The filename itself when it is a method name (get.go).
-//  3. The legacy "get_foo.go" prefix form.
-//
-// relPath is the path relative to define/ (e.g. "agents/@id/get/handler.go").
+// relPath is the path relative to define/ (e.g. "agents/@id/get.go").
 func InferTransportAndMethod(relPath string) (abi.Transport, string) {
 	clean := filepath.ToSlash(relPath)
 	clean = strings.TrimPrefix(clean, "define/")
 	clean = strings.TrimPrefix(clean, "/")
 	segments := strings.Split(clean, "/")
 
-	// 1. Parent folder as method folder.
-	if len(segments) >= 2 {
-		if tr, m, ok := methodFromSegment(segments[len(segments)-2]); ok {
-			return tr, m
-		}
-	}
-
-	// 2. Filename as method name.
 	base := strings.TrimSuffix(segments[len(segments)-1], ".go")
 	if tr, m, ok := methodFromSegment(base); ok {
 		return tr, m
 	}
 
-	// 3. Legacy prefix form: get_foo.go, ws_room.go, ...
-	switch {
-	case strings.HasPrefix(base, "get_"):
-		return abi.TransportREST, "GET"
-	case strings.HasPrefix(base, "post_"):
-		return abi.TransportREST, "POST"
-	case strings.HasPrefix(base, "put_"):
-		return abi.TransportREST, "PUT"
-	case strings.HasPrefix(base, "del_"):
-		return abi.TransportREST, "DELETE"
-	case strings.HasPrefix(base, "delete_"):
-		return abi.TransportREST, "DELETE"
-	case strings.HasPrefix(base, "patch_"):
-		return abi.TransportREST, "PATCH"
-	case strings.HasPrefix(base, "ws_"):
-		return abi.TransportWebSocket, "CONNECT"
-	case strings.HasPrefix(base, "grpc_"):
-		return abi.TransportGRPC, "POST"
-	case strings.HasPrefix(base, "udp_"):
-		return abi.TransportUDP, "SEND"
-	case strings.HasPrefix(base, "mqtt_"):
-		return abi.TransportMQTT, "SUB"
-	case strings.HasPrefix(base, "nats_"):
-		return abi.TransportNATS, "SUB"
-	case strings.HasPrefix(base, "kafka_"):
-		return abi.TransportKafka, "CONSUME"
-	default:
-		return abi.TransportREST, "GET"
-	}
+	return abi.TransportREST, "GET"
 }
 
 // IsGuardFile reports whether a filename is a guard implementation (index.go).
 // Guard files declare a Guard function and are never routes themselves.
 func IsGuardFile(fileName string) bool {
 	return strings.TrimSuffix(fileName, ".go") == "index"
-}
-
-func stripMethodPrefix(seg string) string {
-	prefixes := []string{
-		"get_", "post_", "put_", "del_", "delete_", "patch_",
-		"ws_", "grpc_", "udp_", "mqtt_", "nats_", "kafka_",
-	}
-	for _, p := range prefixes {
-		if strings.HasPrefix(seg, p) {
-			return strings.TrimPrefix(seg, p)
-		}
-	}
-	return seg
 }
 
 // WalkDefineTree discovers all route handler Go files under defineDir.
@@ -250,13 +190,19 @@ func WalkDefineTree(defineDir string) ([]FileRoute, error) {
 			return nil
 		}
 
+		base := filepath.Base(path)
+		methodName := strings.TrimSuffix(base, ".go")
+		rel, _ := filepath.Rel(defineDir, path)
+		if !isMethodSegment(methodName) {
+			return fmt.Errorf("route %s: unsupported handler filename %q: NXP only supports bare method files (e.g. define/agents/get.go); method folders (handler.go) and legacy prefix files are not supported", rel, base)
+		}
+
 		contentBytes, err := os.ReadFile(path)
 		if err != nil {
 			return err
 		}
 		content := string(contentBytes)
 
-		rel, _ := filepath.Rel(defineDir, path)
 		directives := ParseDirectives(content)
 
 		if !directives.HasGuardDirective {

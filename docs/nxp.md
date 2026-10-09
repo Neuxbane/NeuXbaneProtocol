@@ -45,11 +45,7 @@ The `Result` type is any Go struct; its tags become the response schema.
 
 ## 2. Directory Tree Routing
 
-Routes are derived directly from the filesystem layout under `define/`. There are **three** accepted authoring forms — `handler.go` is **not required**.
-
-### Form A — Bare method file (recommended)
-
-The filename itself is the method:
+Routes are derived directly from the filesystem layout under `define/`. Routes are authored exclusively as **bare method files** named after the HTTP method (or transport):
 
 ```
 define/get.go                    -> GET     /
@@ -61,31 +57,10 @@ define/some/socket/ws.go         -> CONNECT /some/socket
 define/sensors/telemetry/mqtt.go -> SUB     /sensors/telemetry
 ```
 
-### Form B — Method folder + `handler.go`
-
-The folder is the method and `handler.go` is the handler:
-
-```
-define/get/handler.go                    -> GET    /
-define/agents/get/handler.go             -> GET    /agents
-define/agents/@id/get/handler.go         -> GET    /agents/{id}
-define/sources/@id/sync/post/handler.go  -> POST   /sources/{id}/sync
-define/chat/room/ws/handler.go           -> CONNECT /chat/room
-```
-
-### Form C — Legacy prefix file
-
-```
-define/get_user.go    -> GET     /user
-define/post_login.go  -> POST    /login
-define/ws_stream.go   -> CONNECT /stream
-define/mqtt_events.go -> SUB     /events
-```
-
 ### Path translation rules
 
 - Leading `define/` and trailing `.go` are removed.
-- A **method segment** (`get`, `post`, `put`, `patch`, `delete`/`del`, `ws`, `rtc`, `grpc`, `udp`, `mqtt`, `nats`, `kafka`) never contributes to the path — whether it is a folder or a filename.
+- A **method filename** (`get`, `post`, `put`, `patch`, `delete`/`del`, `ws`, `rtc`, `grpc`, `udp`, `mqtt`, `nats`, `kafka`) determines the method/transport and never contributes to the route path.
 - Dynamic parameters use `@param` **or** `[param]` and become `{param}`: `define/items/@id/get.go` -> `/items/{id}`.
 - A leading `/` is prepended.
 
@@ -106,11 +81,8 @@ define/mqtt_events.go -> SUB     /events
 | `nats` | NATS | `SUB` |
 | `kafka` | Kafka | `CONSUME` |
 
-> **Why method folders?** Go allows only one `Handler`/`Request`/`Response` per package.
-> Putting each method in its own folder (`get/handler.go`, `post/handler.go`) keeps every
-> route in its own package, so a path can expose multiple methods without symbol collisions.
-> When you author a bare method file (`get.go`), the framework stages it into a method
-> folder (`get/handler.go`) automatically — you never have to do this yourself.
+> **How method isolation works:** Go allows only one `Handler`/`Request`/`Response` per package.
+> When you author bare method files (`define/agents/get.go`, `define/agents/post.go`), the framework automatically stages each method into an isolated package (`agents/get`, `agents/post`) during compilation — you never have to manage method folders yourself.
 
 ---
 

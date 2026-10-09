@@ -15,26 +15,17 @@ func TestComputeRoutePath(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"define/get/handler.go", "/"},
-		{"define/auth/get/handler.go", "/auth"},
-		{"define/auth/login.go", "/auth/login"},
-		{"define/users/[id].go", "/users/{id}"},
-		{"define/users/[id]/tokens/get/handler.go", "/users/{id}/tokens"},
-		{"define/get_profile.go", "/profile"},
-		{"define/auth/post_login.go", "/auth/login"},
-		{"define/del_item.go", "/item"},
-		{"define/ws_chat.go", "/chat"},
-		{"define/mqtt_sensors.go", "/sensors"},
-		// Folder-routing convention: method folder + handler.go, or bare method file.
-		{"define/agents/get/handler.go", "/agents"},
-		{"define/agents/post/handler.go", "/agents"},
-		{"define/agents/@id/get/handler.go", "/agents/{id}"},
-		{"define/agents/@id/patch/handler.go", "/agents/{id}"},
-		{"define/agents/@id/delete/handler.go", "/agents/{id}"},
+		{"define/get.go", "/"},
+		{"define/auth/get.go", "/auth"},
+		{"define/users/[id]/tokens/get.go", "/users/{id}/tokens"},
+		{"define/agents/get.go", "/agents"},
+		{"define/agents/post.go", "/agents"},
 		{"define/agents/@id/get.go", "/agents/{id}"},
-		{"define/chat/room/ws/handler.go", "/chat/room"},
-		{"define/sensors/telemetry/mqtt/handler.go", "/sensors/telemetry"},
-		{"define/storage/download/get/handler.go", "/storage/download"},
+		{"define/agents/@id/patch.go", "/agents/{id}"},
+		{"define/agents/@id/delete.go", "/agents/{id}"},
+		{"define/chat/room/ws.go", "/chat/room"},
+		{"define/sensors/telemetry/mqtt.go", "/sensors/telemetry"},
+		{"define/storage/download/get.go", "/storage/download"},
 	}
 
 	for _, tt := range tests {
@@ -51,27 +42,19 @@ func TestInferTransportAndMethod(t *testing.T) {
 		wantTr   abi.Transport
 		wantMeth string
 	}{
-		// Method folder + handler.go
-		{"agents/get/handler.go", abi.TransportREST, "GET"},
-		{"agents/post/handler.go", abi.TransportREST, "POST"},
-		{"agents/@id/patch/handler.go", abi.TransportREST, "PATCH"},
-		{"agents/@id/delete/handler.go", abi.TransportREST, "DELETE"},
-		{"chat/room/ws/handler.go", abi.TransportWebSocket, "CONNECT"},
-		{"sensors/telemetry/mqtt/handler.go", abi.TransportMQTT, "SUB"},
-		// Bare method filename
 		{"agents/@id/get.go", abi.TransportREST, "GET"},
+		{"agents/@id/post.go", abi.TransportREST, "POST"},
 		{"agents/@id/patch.go", abi.TransportREST, "PATCH"},
 		{"agents/@id/delete.go", abi.TransportREST, "DELETE"},
-		// Legacy prefix form
-		{"get_user.go", abi.TransportREST, "GET"},
-		{"post_login.go", abi.TransportREST, "POST"},
-		{"ws_stream.go", abi.TransportWebSocket, "CONNECT"},
-		{"grpc_service.go", abi.TransportGRPC, "POST"},
-		{"udp_telemetry.go", abi.TransportUDP, "SEND"},
-		{"mqtt_events.go", abi.TransportMQTT, "SUB"},
-		{"nats_jobs.go", abi.TransportNATS, "SUB"},
-		{"kafka_orders.go", abi.TransportKafka, "CONSUME"},
-		{"index.go", abi.TransportREST, "GET"},
+		{"chat/room/ws.go", abi.TransportWebSocket, "CONNECT"},
+		{"meet/room/rtc.go", abi.TransportWebRTC, "CONNECT"},
+		{"grpc/service/grpc.go", abi.TransportGRPC, "POST"},
+		{"telemetry/udp.go", abi.TransportUDP, "SEND"},
+		{"sensors/telemetry/mqtt.go", abi.TransportMQTT, "SUB"},
+		{"events/nats.go", abi.TransportNATS, "SUB"},
+		{"orders/kafka.go", abi.TransportKafka, "CONSUME"},
+		{"get.go", abi.TransportREST, "GET"},
+		{"del.go", abi.TransportREST, "DELETE"},
 	}
 
 	for _, tt := range tests {
@@ -214,10 +197,8 @@ func TestGenerateProject(t *testing.T) {
 	authDir := filepath.Join(defineDir, "auth")
 	_ = os.MkdirAll(authDir, 0755)
 
-	// Root GET handler lives in a method folder: define/get/handler.go.
-	rootGetDir := filepath.Join(defineDir, "get")
-	_ = os.MkdirAll(rootGetDir, 0755)
-	indexFile := filepath.Join(rootGetDir, "handler.go")
+	// Root GET handler: define/get.go
+	indexFile := filepath.Join(defineDir, "get.go")
 	indexCode := `// @guard
 package get
 
@@ -241,10 +222,12 @@ func Guard(ctx *rest.Ctx) error {
 `
 	_ = os.WriteFile(guardFile, []byte(guardCode), 0644)
 
-	loginFile := filepath.Join(authDir, "post_login.go")
+	loginDir := filepath.Join(authDir, "login")
+	_ = os.MkdirAll(loginDir, 0755)
+	loginFile := filepath.Join(loginDir, "post.go")
 	loginCode := `// @auth public
 // @guard auth
-package auth
+package post
 
 import "github.com/Neuxbane/NeuXbaneProtocol/nxp/rest"
 
@@ -380,6 +363,64 @@ func TestGuardRestrictions(t *testing.T) {
 		expectedGuards := []string{"guard.account.auth", "guard.account.admin"}
 		if len(routes[0].Guards) != 2 || routes[0].Guards[0] != expectedGuards[0] || routes[0].Guards[1] != expectedGuards[1] {
 			t.Fatalf("expected guards %v, got %v", expectedGuards, routes[0].Guards)
+		}
+	})
+}
+
+func TestRejectFallbacks(t *testing.T) {
+	t.Run("RejectMethodFolderHandlerGo", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "reject-handler-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		sub := filepath.Join(tmpDir, "agents", "get")
+		_ = os.MkdirAll(sub, 0755)
+		_ = os.WriteFile(filepath.Join(sub, "handler.go"), []byte("// @guard\npackage get\n"), 0644)
+
+		_, err = codegen.WalkDefineTree(tmpDir)
+		if err == nil {
+			t.Fatal("expected WalkDefineTree to reject handler.go, got nil error")
+		}
+		if !strings.Contains(err.Error(), "unsupported handler filename \"handler.go\"") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+
+		stageDir := filepath.Join(tmpDir, "staged")
+		_, err = codegen.StageDefineTree(tmpDir, stageDir)
+		if err == nil {
+			t.Fatal("expected StageDefineTree to reject handler.go, got nil error")
+		}
+		if !strings.Contains(err.Error(), "unsupported handler filename \"handler.go\"") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("RejectLegacyPrefixFile", func(t *testing.T) {
+		tmpDir, err := os.MkdirTemp("", "reject-prefix-*")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer os.RemoveAll(tmpDir)
+
+		_ = os.WriteFile(filepath.Join(tmpDir, "get_user.go"), []byte("// @guard\npackage user\n"), 0644)
+
+		_, err = codegen.WalkDefineTree(tmpDir)
+		if err == nil {
+			t.Fatal("expected WalkDefineTree to reject get_user.go, got nil error")
+		}
+		if !strings.Contains(err.Error(), "unsupported handler filename \"get_user.go\"") {
+			t.Fatalf("unexpected error message: %v", err)
+		}
+
+		stageDir := filepath.Join(tmpDir, "staged")
+		_, err = codegen.StageDefineTree(tmpDir, stageDir)
+		if err == nil {
+			t.Fatal("expected StageDefineTree to reject get_user.go, got nil error")
+		}
+		if !strings.Contains(err.Error(), "unsupported handler filename \"get_user.go\"") {
+			t.Fatalf("unexpected error message: %v", err)
 		}
 	})
 }

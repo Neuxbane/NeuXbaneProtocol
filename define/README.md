@@ -32,10 +32,6 @@ A route is a **method file** named after the HTTP method (or transport):
 Method file names: `get.go`, `post.go`, `put.go`, `patch.go`, `delete.go`, `ws.go`, `grpc.go`, `udp.go`, `mqtt.go`, `nats.go`, `kafka.go`.
 A `@name` folder (or `[name]`) becomes a dynamic path parameter `{name}`.
 
-> Alternative form: a **method folder** containing a `handler.go` is equivalent
-> (`define/agents/get/handler.go` -> `GET /agents`). Prefer the bare method file.
-> A legacy prefix file (`define/get_user.go` -> `GET /user`) is also accepted.
-
 ### Guards
 
 `index.go` is a **guard implementation**, not a route. The folder name is the guard name:

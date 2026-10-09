@@ -45,6 +45,10 @@ func StageDefineTree(defineDir, stageDir string) (map[string]string, error) {
 			return err
 		}
 
+		if !IsGuardFile(base) && !isMethodSegment(strings.TrimSuffix(base, ".go")) {
+			return fmt.Errorf("route %s: unsupported handler filename %q: NXP only supports bare method files (e.g. define/agents/get.go); method folders (handler.go) and legacy prefix files are not supported", rel, base)
+		}
+
 		stagedRel := sanitizeStagePath(rel)
 		stagedPath := filepath.Join(stageDir, stagedRel)
 
@@ -78,9 +82,9 @@ func StageDefineTree(defineDir, stageDir string) (map[string]string, error) {
 
 // sanitizeStagePath rewrites each path segment of a relative define path so it
 // is a valid Go import path component. "@param" becomes "_param".
-// If the file is a bare method name (e.g. get.go, post.go), it is staged into a
-// method folder (e.g. get/handler.go) so that multiple HTTP methods for the same
-// route live in separate packages without symbol collisions.
+// Bare method files (e.g. get.go, post.go) are staged into a method folder
+// (e.g. get/get.go) so that multiple HTTP methods for the same route live in
+// separate packages without symbol collisions.
 func sanitizeStagePath(rel string) string {
 	rel = filepath.ToSlash(rel)
 	segments := strings.Split(rel, "/")
@@ -89,11 +93,11 @@ func sanitizeStagePath(rel string) string {
 		if strings.HasPrefix(seg, "@") && len(seg) > 1 {
 			segments[i] = "_" + seg[1:]
 		}
-		if last && strings.HasSuffix(seg, ".go") && seg != "handler.go" && seg != "index.go" {
+		if last && strings.HasSuffix(seg, ".go") && seg != "index.go" {
 			base := strings.TrimSuffix(seg, ".go")
 			if isMethodSegment(base) {
 				segments[i] = base
-				segments = append(segments, "handler.go")
+				segments = append(segments, seg)
 			}
 		}
 	}
